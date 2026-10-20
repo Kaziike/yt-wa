@@ -16,6 +16,7 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -61,7 +62,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -110,7 +111,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     private fun setupWebView() {
         val settings = webView.settings
         settings.apply {
@@ -128,6 +129,21 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+        // ĐẢM BẢO BÀN PHÍM HOẠT ĐỘNG: Bật focusable và bắt touch để kích hoạt bàn phím ảo
+        webView.isFocusable = true
+        webView.isFocusableInTouchMode = true
+        webView.requestFocus(View.FOCUS_DOWN)
+        webView.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP -> {
+                    if (!v.hasFocus()) {
+                        v.requestFocus()
+                    }
+                }
+            }
+            false
+        }
 
         webView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
         webView.webViewClient = AppWebViewClient(applicationContext)
@@ -209,7 +225,6 @@ class MainActivity : AppCompatActivity() {
                 val builder = PictureInPictureParams.Builder()
                     .setAspectRatio(Rational(16, 9))
 
-                // Thêm nút Play/Pause Native trực tiếp lên cửa sổ PiP để tương tác được
                 val iconRes = if (isVideoPlaying) {
                     android.R.drawable.ic_media_pause
                 } else {
@@ -260,7 +275,6 @@ class MainActivity : AppCompatActivity() {
         if (isVideoPlaying || isFullscreen) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 try {
-                    // Kích hoạt giao diện PiP sạch trước khi chuyển cửa sổ
                     webView.evaluateJavascript("document.documentElement.classList.add('pip-active');") {
                         val params = PictureInPictureParams.Builder()
                             .setAspectRatio(Rational(16, 9))
@@ -282,6 +296,13 @@ class MainActivity : AppCompatActivity() {
             webView.evaluateJavascript("document.documentElement.classList.add('pip-active');", null)
             updatePipParams()
         } else {
+            webView.evaluateJavascript("document.documentElement.classList.remove('pip-active');", null)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || !isInPictureInPictureMode) {
             webView.evaluateJavascript("document.documentElement.classList.remove('pip-active');", null)
         }
     }

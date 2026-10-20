@@ -111,8 +111,9 @@
 
     // ==============================================================
     // 3. DUY TRÌ ÂM THANH KHI TẮT MÀN HÌNH (THEO CƠ CHẾ BRAVE)
+    // CHÚ Ý: KHÔNG CHẶN sự kiện 'blur' vì sẽ làm đơ bàn phím khi bấm vào ô tìm kiếm!
     // ==============================================================
-    ['visibilitychange', 'webkitvisibilitychange', 'pagehide', 'blur'].forEach(eventType => {
+    ['visibilitychange', 'webkitvisibilitychange', 'pagehide'].forEach(eventType => {
         window.addEventListener(eventType, function(e) {
             e.stopImmediatePropagation();
         }, true);
