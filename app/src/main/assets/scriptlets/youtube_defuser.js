@@ -1,9 +1,8 @@
 /**
- * BRAVE SHIELDS SCRIPTLET DÀNH RIÊNG CHO YOUTUBE MOBILE (M.YOUTUBE.COM)
- * Chức năng:
- * 1. Hook JSON.parse & fetch để loại bỏ metadata quảng cáo
- * 2. Khắc chế SSAI (Server-Side Ads) bằng cơ chế Tua siêu tốc 16x + Auto-skip
- * 3. Chống ngắt video khi chạy nền (Bypass Background Pause)
+ * BRAVE SHIELDS SCRIPTLET DÀNH CHO YOUTUBE LITE
+ * 1. Chặn và gọt sạch metadata quảng cáo (InnerTube & SSAI 16x)
+ * 2. Cơ chế chạy nền: Ngăn YouTube tự dừng nhạc khi tắt màn hình
+ * 3. Đồng bộ trạng thái phát và tọa độ Video với Android Native để hỗ trợ PiP chuẩn xác
  */
 
 (function() {
@@ -11,10 +10,10 @@
     if (window.__brave_yt_shield_active) return;
     window.__brave_yt_shield_active = true;
 
-    console.log('[BraveShield] Khởi chạy YouTube Defuser Engine...');
+    console.log('[BraveShield] Khởi chạy YouTube Engine...');
 
     // ==============================================================
-    // 1. TẨY SẠCH DỮ LIỆU QUẢNG CÁO TRONG OBJECT
+    // 1. TẨY SẠCH DỮ LIỆU QUẢNG CÁO (INNERTUBE API)
     // ==============================================================
     function sanitizePlayerObj(obj) {
         if (!obj || typeof obj !== 'object') return obj;
@@ -32,7 +31,6 @@
         return obj;
     }
 
-    // Ghi đè JSON.parse để chặn ad metadata nạp vào web
     const originalJSONParse = JSON.parse;
     JSON.parse = function() {
         const result = originalJSONParse.apply(this, arguments);
@@ -43,19 +41,13 @@
         }
     };
 
-    // Khóa thuộc tính ytInitialPlayerResponse
     let initialPlayerResponseVal = window.ytInitialPlayerResponse;
     Object.defineProperty(window, 'ytInitialPlayerResponse', {
-        get: function() {
-            return initialPlayerResponseVal;
-        },
-        set: function(val) {
-            initialPlayerResponseVal = sanitizePlayerObj(val);
-        },
+        get: function() { return initialPlayerResponseVal; },
+        set: function(val) { initialPlayerResponseVal = sanitizePlayerObj(val); },
         configurable: true
     });
 
-    // Hook window.fetch để lọc gói tin /youtubei/v1/player
     if (window.fetch) {
         const originalFetch = window.fetch;
         window.fetch = async function(...args) {
@@ -81,7 +73,7 @@
     }
 
     // ==============================================================
-    // 2. KHẮC CHẾ SSAI (SERVER-SIDE AD INSERTION) - AUTO-SKIP & 16X
+    // 2. KHẮC CHẾ QUẢNG CÁO GHÉP LUỒNG (SSAI) - TUA 16X & AUTO-SKIP
     // ==============================================================
     let isAdPlaying = false;
     let savedVolume = 1.0;
@@ -96,18 +88,13 @@
                 savedVolume = video.volume;
             }
 
-            // Tắt tiếng tức thì để không gây khó chịu
             video.muted = true;
-
-            // Đẩy tốc độ tua tối đa để quét sạch quảng cáo
             video.playbackRate = 16.0;
 
-            // Nhảy tới mốc kết thúc quảng cáo
             if (isFinite(video.duration) && video.duration > 0) {
                 video.currentTime = video.duration;
             }
 
-            // Tự click nút Skip ngay khi xuất hiện
             const skipButtons = document.querySelectorAll(
                 '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .videoAdUiSkipButton, button[class*="skip-button"], .ytp-ad-skip-button-text'
             );
@@ -115,7 +102,6 @@
                 try { btn.click(); } catch (err) {}
             });
         } else if (isAdPlaying && video) {
-            // Quảng cáo đã hết -> phục hồi trạng thái phát chuẩn
             isAdPlaying = false;
             video.playbackRate = 1.0;
             video.muted = false;
@@ -124,19 +110,91 @@
     }, 150);
 
     // ==============================================================
-    // 3. BYPASS BACKGROUND PAUSE (CHO PHÉP PHÁT KHI TẮT MÀN HÌNH)
+    // 3. DUY TRÌ ÂM THANH KHI TẮT MÀN HÌNH (THEO CƠ CHẾ BRAVE)
     // ==============================================================
-    // Chặn sự kiện visibilitychange để YouTube không phát hiện màn hình bị tắt
-    document.addEventListener('visibilitychange', function(e) {
-        e.stopImmediatePropagation();
+    // Chặn triệt để các sự kiện thông báo tab/màn hình bị ẩn
+    ['visibilitychange', 'webkitvisibilitychange', 'pagehide', 'blur'].forEach(eventType => {
+        window.addEventListener(eventType, function(e) {
+            e.stopImmediatePropagation();
+        }, true);
+        document.addEventListener(eventType, function(e) {
+            e.stopImmediatePropagation();
+        }, true);
+    });
+
+    Object.defineProperty(document, 'hidden', { get: function() { return false; } });
+    Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; } });
+
+    // Nhận diện xem người dùng có chủ động bấm nút Tạm dừng (Pause) hay không
+    let isUserExplicitPause = false;
+    window.addEventListener('pointerdown', function(e) {
+        if (e.target && e.target.closest && e.target.closest('.ytp-play-button, button[aria-label*="Pause" i], button[aria-label*="Tạm dừng" i]')) {
+            isUserExplicitPause = true;
+            setTimeout(() => { isUserExplicitPause = false; }, 800);
+        }
     }, true);
 
-    Object.defineProperty(document, 'hidden', {
-        get: function() { return false; }
-    });
-    Object.defineProperty(document, 'visibilityState', {
-        get: function() { return 'visible'; }
-    });
+    // Ghi đè hàm pause của Video: Bỏ qua lệnh pause ngầm khi tắt màn hình
+    const nativeMediaPause = HTMLMediaElement.prototype.pause;
+    HTMLMediaElement.prototype.pause = function() {
+        if (document.hidden && !isUserExplicitPause) {
+            console.log('[BraveShield] Bỏ qua lệnh ngắt âm thanh ngầm khi tắt màn hình!');
+            return;
+        }
+        return nativeMediaPause.apply(this, arguments);
+    };
 
-    console.log('[BraveShield] YouTube Defuser Engine đã kích hoạt thành công!');
+    // ==============================================================
+    // 4. ĐỒNG BỘ TRẠNG THÁI & TỌA ĐỘ VIDEO CHO PIP CHUẨN XÁC
+    // ==============================================================
+    function syncNativeState() {
+        if (!window.AndroidBridge) return;
+
+        const video = document.querySelector('video');
+        if (video) {
+            // 1. Gửi tọa độ thực tế của Video trên màn hình cho Android Native (hỗ trợ PiP không bị vỡ)
+            const rect = video.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                try {
+                    window.AndroidBridge.updateVideoBounds(rect.left, rect.top, rect.right, rect.bottom);
+                } catch (err) {}
+            }
+
+            // 2. Cập nhật trạng thái đang phát / tạm dừng
+            if (!video.paused && !video.ended) {
+                const titleEl = document.querySelector('h1.slim-video-metadata-title, .ytm-slim-video-metadata-renderer-title, .media-item-headline');
+                const channelEl = document.querySelector('.ytm-channel-thumbnail-with-profile-name, .slim-owner-channel-name, .subhead');
+                const title = titleEl ? titleEl.innerText.trim() : 'YouTube Lite';
+                const channel = channelEl ? channelEl.innerText.trim() : '';
+
+                try {
+                    window.AndroidBridge.onVideoPlaying(title, channel);
+                } catch (e) {}
+            } else {
+                try {
+                    window.AndroidBridge.onVideoPaused();
+                } catch (e) {}
+            }
+        } else {
+            try {
+                window.AndroidBridge.onVideoPaused();
+            } catch (e) {}
+        }
+    }
+
+    // Lắng nghe các sự kiện video
+    document.addEventListener('play', function(e) {
+        if (e.target && e.target.tagName === 'VIDEO') syncNativeState();
+    }, true);
+
+    document.addEventListener('pause', function(e) {
+        if (e.target && e.target.tagName === 'VIDEO') {
+            setTimeout(syncNativeState, 200);
+        }
+    }, true);
+
+    // Đồng bộ định kỳ mỗi 1.5 giây để luôn cập nhật tọa độ khi cuộn trang
+    setInterval(syncNativeState, 1500);
+
+    console.log('[BraveShield] Đã kích hoạt toàn bộ tính năng!');
 })();

@@ -1,15 +1,20 @@
 package com.brave.youtubelite
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -17,12 +22,16 @@ import android.widget.FrameLayout
 import android.widget.ProgressBar
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.brave.youtubelite.network.AdBlockEngine
 import com.brave.youtubelite.network.AppWebViewClient
+import com.brave.youtubelite.service.MediaService
+import com.brave.youtubelite.view.KeepAliveWebView
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var webView: WebView
+    private lateinit var webView: KeepAliveWebView
     private lateinit var progressBar: ProgressBar
     private lateinit var customViewContainer: FrameLayout
 
@@ -30,10 +39,18 @@ class MainActivity : AppCompatActivity() {
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var isFullscreen = false
 
+    private var isVideoPlaying = false
+    private var currentTitle = "YouTube Lite"
+    private var currentChannel = ""
+    private var videoSourceRect: Rect? = null
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Yêu cầu quyền thông báo trên Android 13+ để hiện thanh phát nhạc nền
+        requestNotificationPermission()
 
         // 1. Khởi tạo Engine lọc quảng cáo
         AdBlockEngine.init(applicationContext)
@@ -54,6 +71,20 @@ class MainActivity : AppCompatActivity() {
         webView.loadUrl(targetUrl)
     }
 
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    101
+                )
+            }
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun setupWebView() {
         val settings = webView.settings
@@ -64,26 +95,20 @@ class MainActivity : AppCompatActivity() {
             allowFileAccess = false
             allowContentAccess = false
 
-            // Bộ nhớ cache tối ưu để giảm tải mạng
             setCacheMode(WebSettings.LOAD_DEFAULT)
-
-            // Cho phép video tự động phát
             mediaPlaybackRequiresUserGesture = false
-
-            // Giảm tải render ngoài màn hình để tiết kiệm RAM & CPU
             offscreenPreRaster = false
 
-            // Tùy biến User-Agent nhẹ chuẩn Chrome Mobile
             userAgentString = settings.userAgentString.replace("; wv", "")
         }
 
-        // Bật tăng tốc phần cứng
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
-        // Gán WebViewClient tùy biến (chứa bộ lọc và Scriptlet của Brave)
+        // Kết nối cầu nối JavascriptInterface để đồng bộ với Web
+        webView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
+
         webView.webViewClient = AppWebViewClient(applicationContext)
 
-        // Gán WebChromeClient để hỗ trợ Fullscreen Video và thanh tải trang
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 if (newProgress < 100) {
@@ -104,7 +129,6 @@ class MainActivity : AppCompatActivity() {
                 customViewCallback = callback
                 isFullscreen = true
 
-                // Ẩn WebView, hiện khung Fullscreen
                 webView.visibility = View.GONE
                 customViewContainer.visibility = View.VISIBLE
                 customViewContainer.addView(
@@ -115,9 +139,9 @@ class MainActivity : AppCompatActivity() {
                     )
                 )
 
-                // Ẩn thanh trạng thái hệ thống và xoay ngang màn hình
                 window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                updatePipParams()
             }
 
             override fun onHideCustomView() {
@@ -131,9 +155,9 @@ class MainActivity : AppCompatActivity() {
                 customViewContainer.visibility = View.GONE
                 webView.visibility = View.VISIBLE
 
-                // Phục hồi màn hình đứng
                 window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                updatePipParams()
             }
         }
     }
@@ -142,13 +166,10 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (isFullscreen) {
-                    // Nếu đang xem video toàn màn hình -> thoát toàn màn hình trước
                     webView.webChromeClient?.onHideCustomView()
                 } else if (webView.canGoBack()) {
-                    // Nếu có lịch sử duyệt trang -> quay lại trang trước
                     webView.goBack()
                 } else {
-                    // Thoát app
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
                 }
@@ -156,17 +177,54 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    // Tự động vào chế độ Picture-in-Picture (PiP) khi người dùng bấm Home
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
+    /**
+     * Cập nhật thông số PiP với sourceRectHint chính xác theo mô hình Brave.
+     * Cắt đúng tọa độ của Video để không bị vỡ giao diện cả trang web.
+     */
+    private fun updatePipParams() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
-                val params = PictureInPictureParams.Builder()
+                val displayWidth = webView.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+                val displayHeight = webView.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+
+                val targetRect = if (isFullscreen) {
+                    Rect(0, 0, displayWidth, displayHeight)
+                } else {
+                    videoSourceRect ?: Rect(0, 0, displayWidth, (displayWidth * 9) / 16)
+                }
+
+                val builder = PictureInPictureParams.Builder()
                     .setAspectRatio(Rational(16, 9))
-                    .build()
-                enterPictureInPictureMode(params)
-            } catch (e: Exception) {
-                // Không hỗ trợ PiP trên một số dòng máy
+                    .setSourceRectHint(targetRect)
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // Android 12+: Tự động kích hoạt PiP khi vuốt về Home nếu video đang mở
+                    builder.setAutoEnterEnabled(isVideoPlaying || isFullscreen)
+                }
+                setPictureInPictureParams(builder.build())
+            } catch (_: Exception) {}
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (isVideoPlaying || isFullscreen) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try {
+                    val displayWidth = webView.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+                    val displayHeight = webView.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
+                    val targetRect = if (isFullscreen) {
+                        Rect(0, 0, displayWidth, displayHeight)
+                    } else {
+                        videoSourceRect ?: Rect(0, 0, displayWidth, (displayWidth * 9) / 16)
+                    }
+
+                    val params = PictureInPictureParams.Builder()
+                        .setAspectRatio(Rational(16, 9))
+                        .setSourceRectHint(targetRect)
+                        .build()
+                    enterPictureInPictureMode(params)
+                } catch (_: Exception) {}
             }
         }
     }
@@ -178,17 +236,97 @@ class MainActivity : AppCompatActivity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         if (isInPictureInPictureMode) {
             progressBar.visibility = View.GONE
+            // Ẩn tất cả các thành phần web thừa khi đang ở chế độ PiP
+            webView.evaluateJavascript("document.documentElement.classList.add('pip-active');", null)
+        } else {
+            // Khôi phục giao diện bình thường khi phóng to lại app
+            webView.evaluateJavascript("document.documentElement.classList.remove('pip-active');", null)
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Khi quay trở lại app -> dừng notification chạy nền
+        stopMediaService()
     }
 
     override fun onPause() {
         super.onPause()
-        // Giữ video tiếp tục chạy khi tắt màn hình hoặc chuyển app
-        // (Không gọi webView.onPause() để hỗ trợ Background Playback)
+        // Không pause WebView để luồng âm thanh tiếp tục phát
+    }
+
+    override fun onStop() {
+        super.onStop()
+        val inPip = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) isInPictureInPictureMode else false
+        // Nếu app rời màn hình mà không ở PiP -> khởi động MediaService để giữ CPU & Audio Focus
+        if (isVideoPlaying && !inPip) {
+            startMediaService()
+        }
+    }
+
+    private fun startMediaService() {
+        try {
+            val intent = Intent(this, MediaService::class.java).apply {
+                action = MediaService.ACTION_START
+                putExtra(MediaService.EXTRA_TITLE, currentTitle)
+                putExtra(MediaService.EXTRA_CHANNEL, currentChannel)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun stopMediaService() {
+        try {
+            val intent = Intent(this, MediaService::class.java).apply {
+                action = MediaService.ACTION_STOP
+            }
+            startService(intent)
+        } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
+        stopMediaService()
         webView.destroy()
         super.onDestroy()
+    }
+
+    inner class MediaBridge {
+        @JavascriptInterface
+        fun onVideoPlaying(title: String, channel: String) {
+            runOnUiThread {
+                isVideoPlaying = true
+                if (title.isNotEmpty()) currentTitle = title
+                if (channel.isNotEmpty()) currentChannel = channel
+                updatePipParams()
+            }
+        }
+
+        @JavascriptInterface
+        fun onVideoPaused() {
+            runOnUiThread {
+                isVideoPlaying = false
+                stopMediaService()
+                updatePipParams()
+            }
+        }
+
+        // Nhận tọa độ khung hình thực tế của Video từ JavaScript
+        @JavascriptInterface
+        fun updateVideoBounds(left: Float, top: Float, right: Float, bottom: Float) {
+            runOnUiThread {
+                val density = resources.displayMetrics.density
+                videoSourceRect = Rect(
+                    (left * density).toInt(),
+                    (top * density).toInt(),
+                    (right * density).toInt(),
+                    (bottom * density).toInt()
+                )
+                updatePipParams()
+            }
+        }
     }
 }

@@ -5,8 +5,8 @@
     android:layout_height="match_parent"
     android:background="@color/black">
 
-    <!-- Trình duyệt WebView chính -->
-    <WebView
+    <!-- Trình duyệt WebView có cơ chế Keep-Alive chống ngắt âm thanh nền -->
+    <com.brave.youtubelite.view.KeepAliveWebView
         android:id="@+id/webView"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
