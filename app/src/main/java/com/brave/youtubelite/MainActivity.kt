@@ -2,12 +2,17 @@ package com.brave.youtubelite
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.Rect
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
@@ -31,6 +36,10 @@ import com.brave.youtubelite.view.KeepAliveWebView
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val ACTION_PIP_PLAY_PAUSE = "com.brave.youtubelite.PIP_PLAY_PAUSE"
+    }
+
     private lateinit var webView: KeepAliveWebView
     private lateinit var progressBar: ProgressBar
     private lateinit var customViewContainer: FrameLayout
@@ -42,14 +51,30 @@ class MainActivity : AppCompatActivity() {
     private var isVideoPlaying = false
     private var currentTitle = "YouTube Lite"
     private var currentChannel = ""
-    private var videoSourceRect: Rect? = null
+
+    // Receiver lắng nghe nút Bấm Play/Pause ngay trên cửa sổ nổi PiP
+    private val pipActionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == ACTION_PIP_PLAY_PAUSE) {
+                togglePlayPause()
+            }
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Yêu cầu quyền thông báo trên Android 13+ để hiện thanh phát nhạc nền
+        // Đăng ký nhận sự kiện nút bấm từ cửa sổ nổi PiP
+        val filter = IntentFilter(ACTION_PIP_PLAY_PAUSE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(pipActionReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(pipActionReceiver, filter)
+        }
+
+        // Xin quyền thông báo trên Android 13+
         requestNotificationPermission()
 
         // 1. Khởi tạo Engine lọc quảng cáo
@@ -60,10 +85,10 @@ class MainActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         customViewContainer = findViewById(R.id.customViewContainer)
 
-        // 3. Cấu hình WebView tối ưu hiệu năng và tài nguyên
+        // 3. Cấu hình WebView
         setupWebView()
 
-        // 4. Xử lý nút Back của Android hiện đại (OnBackPressedCallback)
+        // 4. Xử lý nút Back
         setupBackPressedHandler()
 
         // 5. Tải YouTube Mobile
@@ -104,9 +129,7 @@ class MainActivity : AppCompatActivity() {
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
-        // Kết nối cầu nối JavascriptInterface để đồng bộ với Web
         webView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
-
         webView.webViewClient = AppWebViewClient(applicationContext)
 
         webView.webChromeClient = object : WebChromeClient() {
@@ -178,27 +201,39 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Cập nhật thông số PiP với sourceRectHint chính xác theo mô hình Brave.
-     * Cắt đúng tọa độ của Video để không bị vỡ giao diện cả trang web.
+     * Cập nhật thông số PiP với tỉ lệ chuẩn 16:9 và nút điều khiển Native
      */
     private fun updatePipParams() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
-                val displayWidth = webView.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
-                val displayHeight = webView.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
-
-                val targetRect = if (isFullscreen) {
-                    Rect(0, 0, displayWidth, displayHeight)
-                } else {
-                    videoSourceRect ?: Rect(0, 0, displayWidth, (displayWidth * 9) / 16)
-                }
-
                 val builder = PictureInPictureParams.Builder()
                     .setAspectRatio(Rational(16, 9))
-                    .setSourceRectHint(targetRect)
+
+                // Thêm nút Play/Pause Native trực tiếp lên cửa sổ PiP để tương tác được
+                val iconRes = if (isVideoPlaying) {
+                    android.R.drawable.ic_media_pause
+                } else {
+                    android.R.drawable.ic_media_play
+                }
+                val actionTitle = if (isVideoPlaying) "Tạm dừng" else "Phát"
+
+                val intent = Intent(ACTION_PIP_PLAY_PAUSE).setPackage(packageName)
+                val pendingIntent = PendingIntent.getBroadcast(
+                    this,
+                    0,
+                    intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+
+                val action = RemoteAction(
+                    Icon.createWithResource(this, iconRes),
+                    actionTitle,
+                    actionTitle,
+                    pendingIntent
+                )
+                builder.setActions(listOf(action))
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    // Android 12+: Tự động kích hoạt PiP khi vuốt về Home nếu video đang mở
                     builder.setAutoEnterEnabled(isVideoPlaying || isFullscreen)
                 }
                 setPictureInPictureParams(builder.build())
@@ -206,24 +241,32 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun togglePlayPause() {
+        webView.evaluateJavascript(
+            """
+            (function() {
+                const v = document.querySelector('video');
+                if (v) {
+                    if (v.paused) v.play(); else v.pause();
+                }
+            })();
+            """.trimIndent(),
+            null
+        )
+    }
+
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (isVideoPlaying || isFullscreen) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 try {
-                    val displayWidth = webView.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
-                    val displayHeight = webView.height.takeIf { it > 0 } ?: resources.displayMetrics.heightPixels
-                    val targetRect = if (isFullscreen) {
-                        Rect(0, 0, displayWidth, displayHeight)
-                    } else {
-                        videoSourceRect ?: Rect(0, 0, displayWidth, (displayWidth * 9) / 16)
+                    // Kích hoạt giao diện PiP sạch trước khi chuyển cửa sổ
+                    webView.evaluateJavascript("document.documentElement.classList.add('pip-active');") {
+                        val params = PictureInPictureParams.Builder()
+                            .setAspectRatio(Rational(16, 9))
+                            .build()
+                        enterPictureInPictureMode(params)
                     }
-
-                    val params = PictureInPictureParams.Builder()
-                        .setAspectRatio(Rational(16, 9))
-                        .setSourceRectHint(targetRect)
-                        .build()
-                    enterPictureInPictureMode(params)
                 } catch (_: Exception) {}
             }
         }
@@ -236,29 +279,25 @@ class MainActivity : AppCompatActivity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         if (isInPictureInPictureMode) {
             progressBar.visibility = View.GONE
-            // Ẩn tất cả các thành phần web thừa khi đang ở chế độ PiP
             webView.evaluateJavascript("document.documentElement.classList.add('pip-active');", null)
+            updatePipParams()
         } else {
-            // Khôi phục giao diện bình thường khi phóng to lại app
             webView.evaluateJavascript("document.documentElement.classList.remove('pip-active');", null)
         }
     }
 
     override fun onStart() {
         super.onStart()
-        // Khi quay trở lại app -> dừng notification chạy nền
         stopMediaService()
     }
 
     override fun onPause() {
         super.onPause()
-        // Không pause WebView để luồng âm thanh tiếp tục phát
     }
 
     override fun onStop() {
         super.onStop()
         val inPip = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) isInPictureInPictureMode else false
-        // Nếu app rời màn hình mà không ở PiP -> khởi động MediaService để giữ CPU & Audio Focus
         if (isVideoPlaying && !inPip) {
             startMediaService()
         }
@@ -289,6 +328,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        try {
+            unregisterReceiver(pipActionReceiver)
+        } catch (_: Exception) {}
         stopMediaService()
         webView.destroy()
         super.onDestroy()
@@ -310,21 +352,6 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 isVideoPlaying = false
                 stopMediaService()
-                updatePipParams()
-            }
-        }
-
-        // Nhận tọa độ khung hình thực tế của Video từ JavaScript
-        @JavascriptInterface
-        fun updateVideoBounds(left: Float, top: Float, right: Float, bottom: Float) {
-            runOnUiThread {
-                val density = resources.displayMetrics.density
-                videoSourceRect = Rect(
-                    (left * density).toInt(),
-                    (top * density).toInt(),
-                    (right * density).toInt(),
-                    (bottom * density).toInt()
-                )
                 updatePipParams()
             }
         }

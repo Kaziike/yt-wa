@@ -2,7 +2,7 @@
  * BRAVE SHIELDS SCRIPTLET DÀNH CHO YOUTUBE LITE
  * 1. Chặn và gọt sạch metadata quảng cáo (InnerTube & SSAI 16x)
  * 2. Cơ chế chạy nền: Ngăn YouTube tự dừng nhạc khi tắt màn hình
- * 3. Đồng bộ trạng thái phát và tọa độ Video với Android Native để hỗ trợ PiP chuẩn xác
+ * 3. Đồng bộ trạng thái phát với Android Native Bridge
  */
 
 (function() {
@@ -112,7 +112,6 @@
     // ==============================================================
     // 3. DUY TRÌ ÂM THANH KHI TẮT MÀN HÌNH (THEO CƠ CHẾ BRAVE)
     // ==============================================================
-    // Chặn triệt để các sự kiện thông báo tab/màn hình bị ẩn
     ['visibilitychange', 'webkitvisibilitychange', 'pagehide', 'blur'].forEach(eventType => {
         window.addEventListener(eventType, function(e) {
             e.stopImmediatePropagation();
@@ -125,7 +124,6 @@
     Object.defineProperty(document, 'hidden', { get: function() { return false; } });
     Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; } });
 
-    // Nhận diện xem người dùng có chủ động bấm nút Tạm dừng (Pause) hay không
     let isUserExplicitPause = false;
     window.addEventListener('pointerdown', function(e) {
         if (e.target && e.target.closest && e.target.closest('.ytp-play-button, button[aria-label*="Pause" i], button[aria-label*="Tạm dừng" i]')) {
@@ -134,7 +132,6 @@
         }
     }, true);
 
-    // Ghi đè hàm pause của Video: Bỏ qua lệnh pause ngầm khi tắt màn hình
     const nativeMediaPause = HTMLMediaElement.prototype.pause;
     HTMLMediaElement.prototype.pause = function() {
         if (document.hidden && !isUserExplicitPause) {
@@ -145,44 +142,24 @@
     };
 
     // ==============================================================
-    // 4. ĐỒNG BỘ TRẠNG THÁI & TỌA ĐỘ VIDEO CHO PIP CHUẨN XÁC
+    // 4. ĐỒNG BỘ TRẠNG THÁI PHÁT
     // ==============================================================
     function syncNativeState() {
         if (!window.AndroidBridge) return;
 
         const video = document.querySelector('video');
-        if (video) {
-            // 1. Gửi tọa độ thực tế của Video trên màn hình cho Android Native (hỗ trợ PiP không bị vỡ)
-            const rect = video.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-                try {
-                    window.AndroidBridge.updateVideoBounds(rect.left, rect.top, rect.right, rect.bottom);
-                } catch (err) {}
-            }
+        if (video && !video.paused && !video.ended) {
+            const titleEl = document.querySelector('h1.slim-video-metadata-title, .ytm-slim-video-metadata-renderer-title, .media-item-headline');
+            const channelEl = document.querySelector('.ytm-channel-thumbnail-with-profile-name, .slim-owner-channel-name, .subhead');
+            const title = titleEl ? titleEl.innerText.trim() : 'YouTube Lite';
+            const channel = channelEl ? channelEl.innerText.trim() : '';
 
-            // 2. Cập nhật trạng thái đang phát / tạm dừng
-            if (!video.paused && !video.ended) {
-                const titleEl = document.querySelector('h1.slim-video-metadata-title, .ytm-slim-video-metadata-renderer-title, .media-item-headline');
-                const channelEl = document.querySelector('.ytm-channel-thumbnail-with-profile-name, .slim-owner-channel-name, .subhead');
-                const title = titleEl ? titleEl.innerText.trim() : 'YouTube Lite';
-                const channel = channelEl ? channelEl.innerText.trim() : '';
-
-                try {
-                    window.AndroidBridge.onVideoPlaying(title, channel);
-                } catch (e) {}
-            } else {
-                try {
-                    window.AndroidBridge.onVideoPaused();
-                } catch (e) {}
-            }
+            try { window.AndroidBridge.onVideoPlaying(title, channel); } catch (e) {}
         } else {
-            try {
-                window.AndroidBridge.onVideoPaused();
-            } catch (e) {}
+            try { window.AndroidBridge.onVideoPaused(); } catch (e) {}
         }
     }
 
-    // Lắng nghe các sự kiện video
     document.addEventListener('play', function(e) {
         if (e.target && e.target.tagName === 'VIDEO') syncNativeState();
     }, true);
@@ -193,7 +170,6 @@
         }
     }, true);
 
-    // Đồng bộ định kỳ mỗi 1.5 giây để luôn cập nhật tọa độ khi cuộn trang
     setInterval(syncNativeState, 1500);
 
     console.log('[BraveShield] Đã kích hoạt toàn bộ tính năng!');
