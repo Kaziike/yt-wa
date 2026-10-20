@@ -1,0 +1,46 @@
+/* ==============================================================
+   COSMETIC FILTERING DÀNH RIÊNG CHO M.YOUTUBE.COM (THEO MÔ HÌNH BRAVE/UBLOCK)
+   ============================================================== */
+
+/* 1. Ẩn tất cả banner quảng cáo, thẻ tài trợ trên trang chủ và danh sách gợi ý */
+.ad-showing,
+.ad-interrupting,
+.ytm-promoted-sparkles-web-renderer,
+.ytm-companion-ad-renderer,
+ytm-promoted-sparkles-text-search-web-renderer,
+ytm-promoted-video-renderer,
+ytm-statement-banner-renderer,
+ytm-brand-video-singleton-renderer,
+ytm-compact-promoted-item-renderer,
+ytm-banner-promo-renderer,
+div[class*="ad-display"],
+div[class*="ytp-ad-"],
+.ytp-ad-overlay-container,
+.ytp-ad-message-container {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    min-height: 0 !important;
+}
+
+/* 2. Ẩn thông báo làm phiền "Mở bằng ứng dụng YouTube / Tải ứng dụng" */
+.mealbar-promo-renderer,
+ytm-mealbar-promo-renderer,
+.open-in-app-banner,
+.mobile-topbar-header-sign-in-button-promo,
+ytm-pivot-bar-item-renderer[aria-label*="Get app"],
+ytm-pivot-bar-item-renderer[aria-label*="Tải ứng dụng"],
+ytm-upsell-dialog-renderer {
+    display: none !important;
+}
+
+/* 3. Tối ưu thanh tìm kiếm và header cho thoáng màn hình */
+ytm-header-bar {
+    border-bottom: 1px solid #272727 !important;
+}
+
+/* 4. Giảm giật lag khi cuộn trang (vô hiệu hóa các hiệu ứng blur nặng) */
+* {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}

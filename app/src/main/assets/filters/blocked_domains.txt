@@ -1,0 +1,22 @@
+# Danh sách domain và endpoint quảng cáo/theo dõi của YouTube và Google
+googleads.g.doubleclick.net
+pagead2.googlesyndication.com
+ad.doubleclick.net
+static.doubleclick.net
+securepubads.g.doubleclick.net
+stats.g.doubleclick.net
+pubads.g.doubleclick.net
+www.google-analytics.com
+ssl.google-analytics.com
+play.google.com/log
+youtube.com/api/stats/ads
+youtube.com/pagead/
+youtube.com/api/stats/qoe
+youtube.com/api/stats/atr
+youtube.com/youtubei/v1/log_event
+yt3.ggpht.com/ads/
+adservice.google.com
+adservice.google.com.vn
+ade.googlesyndication.com
+tpc.googlesyndication.com
+video-ad-stats.googlevideo.com
