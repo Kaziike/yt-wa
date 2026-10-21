@@ -2,7 +2,7 @@
  * BRAVE SHIELDS SCRIPTLET DÀNH CHO YOUTUBE LITE
  * 1. Chặn và gọt sạch metadata quảng cáo (InnerTube & SSAI 16x)
  * 2. Cơ chế chạy nền & Chống tự động ngắt video khi ở kích thước nhỏ (PLAYER_VIEW_TOO_SMALL)
- * 3. Chế độ Video Popup PiP thực thụ: Cô lập thẻ Video phủ 100% khung nổi PiP
+ * 3. Chế độ Video Popup PiP: xem scriptlets/pip_controller.js (được Kotlin chèn riêng)
  * 4. Đồng bộ trạng thái phát với Android Native Bridge
  */
 
@@ -42,12 +42,18 @@
         }
     };
 
-    let initialPlayerResponseVal = window.ytInitialPlayerResponse;
-    Object.defineProperty(window, 'ytInitialPlayerResponse', {
-        get: function() { return initialPlayerResponseVal; },
-        set: function(val) { initialPlayerResponseVal = sanitizePlayerObj(val); },
-        configurable: true
-    });
+    // Bọc try/catch: nếu trang đã khai báo `var ytInitialPlayerResponse` (thuộc tính non-configurable)
+    // thì defineProperty sẽ ném lỗi và làm dừng toàn bộ scriptlet (mất cả đồng bộ Play/Pause với Android).
+    try {
+        let initialPlayerResponseVal = sanitizePlayerObj(window.ytInitialPlayerResponse);
+        Object.defineProperty(window, 'ytInitialPlayerResponse', {
+            get: function() { return initialPlayerResponseVal; },
+            set: function(val) { initialPlayerResponseVal = sanitizePlayerObj(val); },
+            configurable: true
+        });
+    } catch (e) {
+        try { sanitizePlayerObj(window.ytInitialPlayerResponse); } catch (e2) {}
+    }
 
     if (window.fetch) {
         const originalFetch = window.fetch;
@@ -122,11 +128,16 @@
         }, true);
     });
 
-    Object.defineProperty(document, 'hidden', { get: function() { return false; } });
-    Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; } });
+    try {
+        Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+    } catch (e) {}
 
     // Cờ kiểm soát: Chỉ cho phép pause khi người dùng hoặc nút Native PiP chủ động bấm
+    // - __isUserExplicitPause: cho phép đúng 1 lệnh pause
+    // - __braveAllowPauseUntil: cho phép pause trong một khoảng thời gian (nút Pause trên PiP)
     window.__isUserExplicitPause = false;
+    window.__braveAllowPauseUntil = 0;
     window.addEventListener('pointerdown', function(e) {
         if (e.target && e.target.closest && e.target.closest('.ytp-play-button, button[aria-label*="Pause" i], button[aria-label*="Tạm dừng" i]')) {
             window.__isUserExplicitPause = true;
@@ -134,8 +145,20 @@
         }
     }, true);
 
-    const nativeMediaPause = HTMLMediaElement.prototype.pause;
+    if (!window.__braveNativePlay && window.HTMLMediaElement) {
+        window.__braveNativePlay = HTMLMediaElement.prototype.play;
+    }
+    const nativeMediaPause = window.__braveNativePause || HTMLMediaElement.prototype.pause;
+    window.__braveNativePause = nativeMediaPause;
+
     HTMLMediaElement.prototype.pause = function() {
+        if (window.__braveUserPaused) {
+            return nativeMediaPause.apply(this, arguments);
+        }
+        if (window.__braveAllowPauseUntil && Date.now() < window.__braveAllowPauseUntil) {
+            window.__isUserExplicitPause = false;
+            return nativeMediaPause.apply(this, arguments);
+        }
         if (window.__isUserExplicitPause) {
             window.__isUserExplicitPause = false;
             return nativeMediaPause.apply(this, arguments);
@@ -147,21 +170,12 @@
     };
 
     // ==============================================================
-    // 4. CƠ CHẾ VIDEO POPUP PIP THỰC THỤ (CÔ LẬP THẺ VIDEO KHỎI TRANG WEB)
+    // 4. TỈ LỆ KHUNG HÌNH VIDEO CHO CỬA SỔ PIP
+    //    (Phần cô lập video khi vào PiP nằm ở scriptlets/pip_controller.js)
     // ==============================================================
-    // Cách làm: KHÔNG ép các container của YouTube thành position:fixed + nền đen
-    // (dễ khiến một lớp nền đen đè lên video -> màn hình đen nhưng vẫn có tiếng).
-    // Thay vào đó: ẩn toàn bộ trang bằng visibility:hidden (không vẽ cả nền),
-    // chỉ cho thẻ video chính hiện lại và phủ kín khung PiP. CSS nằm trong cosmetic_rules.css.
-    const PIP_HTML_CLASS = 'brave-pip-active';
-    const PIP_VIDEO_CLASS = 'brave-pip-video';
-    const PIP_ANCESTOR_CLASS = 'brave-pip-ancestor';
-    let pipActive = false;
-    let pipTimer = null;
-    let pipVideo = null;
-
     // Chọn thẻ video chính: ưu tiên video đang phát, sau đó video có độ phân giải lớn nhất
     function pickMainVideo() {
+        if (window.__bravePip && window.__bravePip.mainVideo) return window.__bravePip.mainVideo();
         const videos = Array.prototype.slice.call(document.querySelectorAll('video'));
         if (videos.length === 0) return null;
         const playing = videos.filter(function(v) { return !v.paused && !v.ended; });
@@ -174,61 +188,6 @@
         });
         return best;
     }
-    window.__braveMainVideo = pickMainVideo;
-
-    function clearPipMarks() {
-        document.querySelectorAll('.' + PIP_VIDEO_CLASS).forEach(function(el) {
-            el.classList.remove(PIP_VIDEO_CLASS);
-        });
-        document.querySelectorAll('.' + PIP_ANCESTOR_CLASS).forEach(function(el) {
-            el.classList.remove(PIP_ANCESTOR_CLASS);
-        });
-    }
-
-    function applyPipLayout() {
-        const video = pickMainVideo();
-        if (!video) return;
-        if (video !== pipVideo) {
-            clearPipMarks();
-            pipVideo = video;
-        }
-        // Gắn lại class mỗi lần (YouTube có thể ghi đè className của player/video)
-        video.classList.add(PIP_VIDEO_CLASS);
-        let parent = video.parentElement;
-        while (parent && parent !== document.documentElement) {
-            parent.classList.add(PIP_ANCESTOR_CLASS);
-            parent = parent.parentElement;
-        }
-        reportVideoSize(video);
-    }
-
-    window.__enterPipMode = function() {
-        console.log('[BraveShield] Bật chế độ Video Popup PiP...');
-        pipActive = true;
-        document.documentElement.classList.add(PIP_HTML_CLASS);
-        applyPipLayout();
-        // YouTube có thể thay thẻ video khi chuyển bài -> kiểm tra lại định kỳ khi đang ở PiP
-        if (!pipTimer) {
-            pipTimer = setInterval(function() {
-                if (pipActive) applyPipLayout();
-            }, 500);
-        }
-    };
-
-    window.__exitPipMode = function() {
-        if (!pipActive && !document.documentElement.classList.contains(PIP_HTML_CLASS)) return;
-        console.log('[BraveShield] Thoát chế độ Video Popup PiP...');
-        pipActive = false;
-        pipVideo = null;
-        if (pipTimer) {
-            clearInterval(pipTimer);
-            pipTimer = null;
-        }
-        document.documentElement.classList.remove(PIP_HTML_CLASS);
-        clearPipMarks();
-        // Không đụng vào inline style của YouTube; chỉ báo resize để player tự tính lại bố cục
-        try { window.dispatchEvent(new Event('resize')); } catch (e) {}
-    };
 
     // Báo tỉ lệ khung hình thật của video để cửa sổ PiP khớp với video (không bị viền thừa)
     let lastReportedSize = '';
@@ -255,6 +214,7 @@
         const video = pickMainVideo();
         if (video) reportVideoSize(video);
         if (video && !video.paused && !video.ended) {
+            window.__braveUserPaused = false;
             const titleEl = document.querySelector('h1.slim-video-metadata-title, .ytm-slim-video-metadata-renderer-title, .media-item-headline');
             const channelEl = document.querySelector('.ytm-channel-thumbnail-with-profile-name, .slim-owner-channel-name, .subhead');
             const title = titleEl ? titleEl.innerText.trim() : 'YouTube Lite';
@@ -262,13 +222,22 @@
 
             try { window.AndroidBridge.onVideoPlaying(title, channel); } catch (e) {}
         } else {
+            // Nếu vừa bấm Play trên PiP và video đang khởi chạy (Promise play chưa xong), không báo paused đè lên
+            if (window.__bravePlayPendingUntil && Date.now() < window.__bravePlayPendingUntil) {
+                return;
+            }
             try { window.AndroidBridge.onVideoPaused(); } catch (e) {}
         }
     }
 
-    document.addEventListener('play', function(e) {
-        if (e.target && e.target.tagName === 'VIDEO') syncNativeState();
-    }, true);
+    ['play', 'playing'].forEach(function(eventType) {
+        document.addEventListener(eventType, function(e) {
+            if (e.target && e.target.tagName === 'VIDEO') {
+                window.__braveUserPaused = false;
+                syncNativeState();
+            }
+        }, true);
+    });
 
     document.addEventListener('pause', function(e) {
         if (e.target && e.target.tagName === 'VIDEO') {
@@ -276,7 +245,7 @@
         }
     }, true);
 
-    setInterval(syncNativeState, 1500);
+    setInterval(syncNativeState, 1000);
 
     console.log('[BraveShield] Đã kích hoạt toàn bộ tính năng!');
 })();

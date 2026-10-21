@@ -15,11 +15,13 @@ import android.content.res.Configuration
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.util.Rational
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -40,7 +42,12 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val ACTION_PIP_PLAY = "com.brave.youtubelite.PIP_PLAY"
         private const val ACTION_PIP_PAUSE = "com.brave.youtubelite.PIP_PAUSE"
+        private const val TAG = "MainActivity"
+        private const val WEB_LOG_TAG = "WebConsole"
     }
+
+    // Mã JS điều khiển PiP (assets/scriptlets/pip_controller.js), chèn trực tiếp khi cần
+    private var pipControllerJs: String = ""
 
     private lateinit var webView: KeepAliveWebView
     private lateinit var progressBar: ProgressBar
@@ -76,15 +83,26 @@ class MainActivity : AppCompatActivity() {
             addAction(ACTION_PIP_PLAY)
             addAction(ACTION_PIP_PAUSE)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(pipActionReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(pipActionReceiver, filter)
-        }
+        // Bắt buộc dùng RECEIVER_EXPORTED trên Android 13/14 (targetSdk 34) vì nút RemoteAction
+        // trên cửa sổ PiP được kích hoạt bởi tiến trình hệ thống (com.android.systemui).
+        // Nếu dùng RECEIVER_NOT_EXPORTED, hệ thống sẽ chặn broadcast khiến nút Play/Pause không hoạt động.
+        ContextCompat.registerReceiver(
+            this,
+            pipActionReceiver,
+            filter,
+            ContextCompat.RECEIVER_EXPORTED
+        )
 
         requestNotificationPermission()
 
         AdBlockEngine.init(applicationContext)
+
+        pipControllerJs = try {
+            assets.open("scriptlets/pip_controller.js").bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Không đọc được pip_controller.js: ${e.message}")
+            ""
+        }
 
         webView = findViewById(R.id.webView)
         progressBar = findViewById(R.id.progressBar)
@@ -148,9 +166,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
-        webView.webViewClient = AppWebViewClient(applicationContext)
+        val appWebViewClient = AppWebViewClient(applicationContext)
+        appWebViewClient.installDocumentStartScripts(webView)
+        webView.webViewClient = appWebViewClient
 
         webView.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                consoleMessage?.let {
+                    Log.d(WEB_LOG_TAG, "${it.message()} [${it.sourceId()}:${it.lineNumber()}]")
+                }
+                return true
+            }
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 if (newProgress < 100) {
                     progressBar.visibility = View.VISIBLE
@@ -251,10 +277,11 @@ class MainActivity : AppCompatActivity() {
             android.R.drawable.ic_media_play
         }
         val actionTitle = if (isVideoPlaying) "Tạm dừng" else "Phát"
+        val requestCode = if (isVideoPlaying) 1002 else 1001
 
         val pendingIntent = PendingIntent.getBroadcast(
             this,
-            0,
+            requestCode,
             actionIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -283,39 +310,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Xử lý khi người dùng bấm nút PLAY trên PiP: Gọi play()
+    /**
+     * Chèn pip_controller.js (idempotent) rồi gọi window.__bravePip.<method>().
+     * Không phụ thuộc vào youtube_defuser.js, nên vẫn hoạt động kể cả khi scriptlet kia lỗi.
+     */
+    private fun runPipCommand(method: String, onResult: ((String?) -> Unit)? = null) {
+        val script = buildString {
+            append(pipControllerJs)
+            append("\n;(function(){try{")
+            append("return window.__bravePip ? String(window.__bravePip.$method()) : 'pip:missing';")
+            append("}catch(e){return 'pip:error:' + e;}})();")
+        }
+        webView.evaluateJavascript(script) { result ->
+            Log.d(TAG, "PiP $method -> $result")
+            onResult?.invoke(result)
+        }
+    }
+
+    private fun enterPipLayout() {
+        progressBar.visibility = View.GONE
+        runPipCommand("enter")
+    }
+
+    private fun exitPipLayout() {
+        runPipCommand("exit")
+    }
+
+    // Xử lý khi người dùng bấm nút PLAY trên PiP
     private fun handlePipPlay() {
         isVideoPlaying = true
         updatePipParams()
-        webView.evaluateJavascript(
-            """
-            (function() {
-                const v = (window.__braveMainVideo && window.__braveMainVideo()) || document.querySelector('video');
-                if (v) {
-                    v.play().catch(function() {});
-                }
-            })();
-            """.trimIndent(),
-            null
-        )
+        runPipCommand("play")
     }
 
-    // Xử lý khi người dùng bấm nút PAUSE trên PiP: Cho phép pause tường minh
+    // Xử lý khi người dùng bấm nút PAUSE trên PiP: mở khóa hook chặn pause rồi dừng video
     private fun handlePipPause() {
         isVideoPlaying = false
         updatePipParams()
-        webView.evaluateJavascript(
-            """
-            (function() {
-                window.__isUserExplicitPause = true;
-                const v = (window.__braveMainVideo && window.__braveMainVideo()) || document.querySelector('video');
-                if (v) {
-                    v.pause();
-                }
-            })();
-            """.trimIndent(),
-            null
-        )
+        runPipCommand("pause")
     }
 
     override fun onUserLeaveHint() {
@@ -324,13 +356,14 @@ class MainActivity : AppCompatActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 // Cô lập thẻ video ngay lập tức (không chờ callback JS, vì lúc callback trả về
                 // Activity có thể đã qua trạng thái cho phép vào PiP)
-                progressBar.visibility = View.GONE
-                webView.evaluateJavascript("if (window.__enterPipMode) window.__enterPipMode();", null)
+                enterPipLayout()
                 try {
                     if (!isInPictureInPictureMode) {
                         buildPipParams()?.let { enterPictureInPictureMode(it) }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    Log.e(TAG, "enterPictureInPictureMode lỗi: ${e.message}")
+                }
             }
         }
     }
@@ -341,18 +374,23 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         if (isInPictureInPictureMode) {
-            progressBar.visibility = View.GONE
-            webView.evaluateJavascript("if (window.__enterPipMode) window.__enterPipMode();", null)
+            enterPipLayout()
+            // Áp lại ở các nhịp sau khi WebView đã đổi kích thước theo khung PiP
+            webView.postDelayed({ if (isInPipModeCompat()) enterPipLayout() }, 150)
+            webView.postDelayed({ if (isInPipModeCompat()) enterPipLayout() }, 450)
             updatePipParams()
         } else {
-            webView.evaluateJavascript("if (window.__exitPipMode) window.__exitPipMode();", null)
+            exitPipLayout()
         }
     }
 
+    private fun isInPipModeCompat(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
+
     override fun onResume() {
         super.onResume()
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || !isInPictureInPictureMode) {
-            webView.evaluateJavascript("if (window.__exitPipMode) window.__exitPipMode();", null)
+        if (!isInPipModeCompat()) {
+            exitPipLayout()
         }
     }
 
