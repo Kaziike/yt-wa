@@ -46,162 +46,61 @@ ytm-header-bar {
 }
 
 /* ==============================================================
-   5. TỐI ƯU CỬA SỔ PICTURE-IN-PICTURE (PIP)
-   Tự động kích hoạt khi khung hình thu nhỏ thành PiP (Media Query)
-   hoặc khi có class .pip-active, triệt tiêu hoàn toàn lỗi 2 cột.
+   5. CỬA SỔ VIDEO POPUP (PICTURE-IN-PICTURE)
+   Kích hoạt bởi window.__enterPipMode() (class .brave-pip-active trên <html>).
+   - Toàn bộ trang bị ẩn bằng visibility:hidden -> không vẽ chữ, nút, nền
+     (tránh việc một container nền đen đè lên video gây "đen màn hình nhưng có tiếng").
+   - Chỉ thẻ video chính (.brave-pip-video) được hiện lại và phủ kín khung PiP.
+   - Các thẻ cha (.brave-pip-ancestor) được gỡ transform/filter/contain để
+     position:fixed của video bám đúng theo khung nhìn.
    ============================================================== */
-@media (max-height: 300px) and (max-width: 550px) {
-    html, body {
-        background: #000000 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        overflow: hidden !important;
-    }
-
-    /* Ẩn hoàn toàn tất cả thành phần dư thừa: Header, Topbar, Sidebar, Drawer, Search, 3 Dots */
-    header,
-    ytm-mobile-topbar-renderer,
-    ytm-pivot-bar-renderer,
-    .watch-below-the-player,
-    ytm-watch-metadata,
-    #header-bar,
-    .mobile-topbar-header,
-    ytm-browse,
-    ytm-sidebar-renderer,
-    #guide,
-    .pane-container,
-    [class*="sidebar"],
-    [class*="drawer"],
-    [class*="topbar"],
-    [class*="header"],
-    ytm-item-section-renderer,
-    .fullscreen-icon,
-    ytm-searchbox {
-        display: none !important;
-        visibility: hidden !important;
-        width: 0 !important;
-        height: 0 !important;
-        opacity: 0 !important;
-    }
-
-    /* Xóa bỏ bố cục Flexbox chia 2 cột của YouTube */
-    ytm-watch {
-        display: block !important;
-        flex-direction: column !important;
-    }
-
-    /* Đưa toàn bộ cấu trúc chứa Video lấp đầy 100% khung PiP */
-    ytm-app,
-    ytm-watch,
-    ytm-player,
-    #player,
-    #player-container-id,
-    .player-container,
-    .html5-video-player,
-    .html5-video-container {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        max-width: 100vw !important;
-        max-height: 100vh !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        z-index: 2147483647 !important;
-        background: #000000 !important;
-        transform: none !important;
-        display: block !important;
-    }
-
-    /* Thẻ Video tràn viền 100% */
-    video {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        object-fit: contain !important;
-        z-index: 2147483647 !important;
-        background: #000000 !important;
-        transform: none !important;
-    }
-}
-
-/* Hỗ trợ trường hợp có class pip-active trực tiếp */
-html.pip-active,
-html.pip-active body {
+html.brave-pip-active,
+html.brave-pip-active body {
     background: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
     overflow: hidden !important;
 }
 
-html.pip-active header,
-html.pip-active ytm-mobile-topbar-renderer,
-html.pip-active ytm-pivot-bar-renderer,
-html.pip-active .watch-below-the-player,
-html.pip-active ytm-watch-metadata,
-html.pip-active #header-bar,
-html.pip-active .mobile-topbar-header,
-html.pip-active ytm-browse,
-html.pip-active ytm-sidebar-renderer,
-html.pip-active #guide,
-html.pip-active .pane-container,
-html.pip-active [class*="sidebar"],
-html.pip-active [class*="drawer"],
-html.pip-active [class*="topbar"],
-html.pip-active [class*="header"],
-html.pip-active ytm-item-section-renderer,
-html.pip-active .fullscreen-icon,
-html.pip-active ytm-searchbox {
-    display: none !important;
+html.brave-pip-active body * {
     visibility: hidden !important;
-    width: 0 !important;
-    height: 0 !important;
-    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
-html.pip-active ytm-watch {
+html.brave-pip-active .brave-pip-ancestor {
+    transform: none !important;
+    -webkit-transform: none !important;
+    filter: none !important;
+    perspective: none !important;
+    contain: none !important;
+    will-change: auto !important;
+    content-visibility: visible !important;
+    clip-path: none !important;
+    -webkit-mask: none !important;
+    mask: none !important;
+    opacity: 1 !important;
+}
+
+html.brave-pip-active video.brave-pip-video {
+    visibility: visible !important;
     display: block !important;
-    flex-direction: column !important;
-}
-
-html.pip-active ytm-app,
-html.pip-active ytm-watch,
-html.pip-active ytm-player,
-html.pip-active #player,
-html.pip-active #player-container-id,
-html.pip-active .player-container,
-html.pip-active .html5-video-player,
-html.pip-active .html5-video-container {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
+    right: auto !important;
+    bottom: auto !important;
     width: 100vw !important;
     height: 100vh !important;
-    max-width: 100vw !important;
-    max-height: 100vh !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
-    z-index: 2147483647 !important;
-    background: #000000 !important;
+    border: 0 !important;
     transform: none !important;
-    display: block !important;
-}
-
-html.pip-active video {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
     object-fit: contain !important;
-    z-index: 2147483647 !important;
     background: #000000 !important;
-    transform: none !important;
+    opacity: 1 !important;
+    z-index: 2147483647 !important;
 }

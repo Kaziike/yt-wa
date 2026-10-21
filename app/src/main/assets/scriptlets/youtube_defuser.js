@@ -149,42 +149,102 @@
     // ==============================================================
     // 4. CƠ CHẾ VIDEO POPUP PIP THỰC THỤ (CÔ LẬP THẺ VIDEO KHỎI TRANG WEB)
     // ==============================================================
+    // Cách làm: KHÔNG ép các container của YouTube thành position:fixed + nền đen
+    // (dễ khiến một lớp nền đen đè lên video -> màn hình đen nhưng vẫn có tiếng).
+    // Thay vào đó: ẩn toàn bộ trang bằng visibility:hidden (không vẽ cả nền),
+    // chỉ cho thẻ video chính hiện lại và phủ kín khung PiP. CSS nằm trong cosmetic_rules.css.
+    const PIP_HTML_CLASS = 'brave-pip-active';
+    const PIP_VIDEO_CLASS = 'brave-pip-video';
+    const PIP_ANCESTOR_CLASS = 'brave-pip-ancestor';
+    let pipActive = false;
+    let pipTimer = null;
+    let pipVideo = null;
+
+    // Chọn thẻ video chính: ưu tiên video đang phát, sau đó video có độ phân giải lớn nhất
+    function pickMainVideo() {
+        const videos = Array.prototype.slice.call(document.querySelectorAll('video'));
+        if (videos.length === 0) return null;
+        const playing = videos.filter(function(v) { return !v.paused && !v.ended; });
+        const pool = playing.length ? playing : videos;
+        let best = pool[0];
+        let bestScore = -1;
+        pool.forEach(function(v) {
+            const score = (v.videoWidth * v.videoHeight) || (v.offsetWidth * v.offsetHeight);
+            if (score > bestScore) { best = v; bestScore = score; }
+        });
+        return best;
+    }
+    window.__braveMainVideo = pickMainVideo;
+
+    function clearPipMarks() {
+        document.querySelectorAll('.' + PIP_VIDEO_CLASS).forEach(function(el) {
+            el.classList.remove(PIP_VIDEO_CLASS);
+        });
+        document.querySelectorAll('.' + PIP_ANCESTOR_CLASS).forEach(function(el) {
+            el.classList.remove(PIP_ANCESTOR_CLASS);
+        });
+    }
+
+    function applyPipLayout() {
+        const video = pickMainVideo();
+        if (!video) return;
+        if (video !== pipVideo) {
+            clearPipMarks();
+            pipVideo = video;
+        }
+        // Gắn lại class mỗi lần (YouTube có thể ghi đè className của player/video)
+        video.classList.add(PIP_VIDEO_CLASS);
+        let parent = video.parentElement;
+        while (parent && parent !== document.documentElement) {
+            parent.classList.add(PIP_ANCESTOR_CLASS);
+            parent = parent.parentElement;
+        }
+        reportVideoSize(video);
+    }
+
     window.__enterPipMode = function() {
-        console.log('[BraveShield] Bật chế độ Video Popup PiP thực thụ...');
-        document.documentElement.classList.add('pip-active');
-        document.body.classList.add('pip-active');
-
-        const video = document.querySelector('video');
-        if (video) {
-            // Xóa bỏ thuộc tính transform của tất cả thẻ cha để thẻ video có thể bung tràn màn hình
-            let parent = video.parentElement;
-            while (parent && parent !== document.body) {
-                parent.style.transform = 'none';
-                parent.style.webkitTransform = 'none';
-                parent = parent.parentElement;
-            }
-
-            // Ép thẻ video tràn 100% khung hình PiP và đè lên toàn bộ các thành phần web
-            video.style.cssText = 'position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;z-index:2147483647!important;object-fit:contain!important;background:#000000!important;';
+        console.log('[BraveShield] Bật chế độ Video Popup PiP...');
+        pipActive = true;
+        document.documentElement.classList.add(PIP_HTML_CLASS);
+        applyPipLayout();
+        // YouTube có thể thay thẻ video khi chuyển bài -> kiểm tra lại định kỳ khi đang ở PiP
+        if (!pipTimer) {
+            pipTimer = setInterval(function() {
+                if (pipActive) applyPipLayout();
+            }, 500);
         }
     };
 
     window.__exitPipMode = function() {
+        if (!pipActive && !document.documentElement.classList.contains(PIP_HTML_CLASS)) return;
         console.log('[BraveShield] Thoát chế độ Video Popup PiP...');
-        document.documentElement.classList.remove('pip-active');
-        document.body.classList.remove('pip-active');
-
-        const video = document.querySelector('video');
-        if (video) {
-            video.style.cssText = '';
-            let parent = video.parentElement;
-            while (parent && parent !== document.body) {
-                parent.style.transform = '';
-                parent.style.webkitTransform = '';
-                parent = parent.parentElement;
-            }
+        pipActive = false;
+        pipVideo = null;
+        if (pipTimer) {
+            clearInterval(pipTimer);
+            pipTimer = null;
         }
+        document.documentElement.classList.remove(PIP_HTML_CLASS);
+        clearPipMarks();
+        // Không đụng vào inline style của YouTube; chỉ báo resize để player tự tính lại bố cục
+        try { window.dispatchEvent(new Event('resize')); } catch (e) {}
     };
+
+    // Báo tỉ lệ khung hình thật của video để cửa sổ PiP khớp với video (không bị viền thừa)
+    let lastReportedSize = '';
+    function reportVideoSize(video) {
+        if (!window.AndroidBridge || !video || !video.videoWidth || !video.videoHeight) return;
+        const key = video.videoWidth + 'x' + video.videoHeight;
+        if (key === lastReportedSize) return;
+        lastReportedSize = key;
+        try { window.AndroidBridge.onVideoSize(video.videoWidth, video.videoHeight); } catch (e) {}
+    }
+
+    ['loadedmetadata', 'resize'].forEach(function(eventType) {
+        document.addEventListener(eventType, function(e) {
+            if (e.target && e.target.tagName === 'VIDEO') reportVideoSize(e.target);
+        }, true);
+    });
 
     // ==============================================================
     // 5. ĐỒNG BỘ TRẠNG THÁI PHÁT VỚI ANDROID NATIVE
@@ -192,7 +252,8 @@
     function syncNativeState() {
         if (!window.AndroidBridge) return;
 
-        const video = document.querySelector('video');
+        const video = pickMainVideo();
+        if (video) reportVideoSize(video);
         if (video && !video.paused && !video.ended) {
             const titleEl = document.querySelector('h1.slim-video-metadata-title, .ytm-slim-video-metadata-renderer-title, .media-item-headline');
             const channelEl = document.querySelector('.ytm-channel-thumbnail-with-profile-name, .slim-owner-channel-name, .subhead');
