@@ -1,8 +1,9 @@
 /**
  * BRAVE SHIELDS SCRIPTLET DÀNH CHO YOUTUBE LITE
  * 1. Chặn và gọt sạch metadata quảng cáo (InnerTube & SSAI 16x)
- * 2. Cơ chế chạy nền: Ngăn YouTube tự dừng nhạc khi tắt màn hình
- * 3. Đồng bộ trạng thái phát với Android Native Bridge
+ * 2. Cơ chế chạy nền & Chống tự động ngắt video khi ở kích thước nhỏ (PLAYER_VIEW_TOO_SMALL)
+ * 3. Chế độ Video Popup PiP thực thụ: Cô lập thẻ Video phủ 100% khung nổi PiP
+ * 4. Đồng bộ trạng thái phát với Android Native Bridge
  */
 
 (function() {
@@ -10,7 +11,7 @@
     if (window.__brave_yt_shield_active) return;
     window.__brave_yt_shield_active = true;
 
-    console.log('[BraveShield] Khởi chạy YouTube Engine...');
+    console.log('[BraveShield] Khởi chạy YouTube Engine 4.0...');
 
     // ==============================================================
     // 1. TẨY SẠCH DỮ LIỆU QUẢNG CÁO (INNERTUBE API)
@@ -110,8 +111,7 @@
     }, 150);
 
     // ==============================================================
-    // 3. DUY TRÌ ÂM THANH KHI TẮT MÀN HÌNH (THEO CƠ CHẾ BRAVE)
-    // CHÚ Ý: KHÔNG CHẶN sự kiện 'blur' vì sẽ làm đơ bàn phím khi bấm vào ô tìm kiếm!
+    // 3. DUY TRÌ ÂM THANH KHI TẮT MÀN HÌNH & CHỐNG TỰ DỪNG KHI THU NHỎ (PLAYER_VIEW_TOO_SMALL)
     // ==============================================================
     ['visibilitychange', 'webkitvisibilitychange', 'pagehide'].forEach(eventType => {
         window.addEventListener(eventType, function(e) {
@@ -125,25 +125,69 @@
     Object.defineProperty(document, 'hidden', { get: function() { return false; } });
     Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; } });
 
-    let isUserExplicitPause = false;
+    // Cờ kiểm soát: Chỉ cho phép pause khi người dùng hoặc nút Native PiP chủ động bấm
+    window.__isUserExplicitPause = false;
     window.addEventListener('pointerdown', function(e) {
         if (e.target && e.target.closest && e.target.closest('.ytp-play-button, button[aria-label*="Pause" i], button[aria-label*="Tạm dừng" i]')) {
-            isUserExplicitPause = true;
-            setTimeout(() => { isUserExplicitPause = false; }, 800);
+            window.__isUserExplicitPause = true;
+            setTimeout(() => { window.__isUserExplicitPause = false; }, 800);
         }
     }, true);
 
     const nativeMediaPause = HTMLMediaElement.prototype.pause;
     HTMLMediaElement.prototype.pause = function() {
-        if (document.hidden && !isUserExplicitPause) {
-            console.log('[BraveShield] Bỏ qua lệnh ngắt âm thanh ngầm khi tắt màn hình!');
-            return;
+        if (window.__isUserExplicitPause) {
+            window.__isUserExplicitPause = false;
+            return nativeMediaPause.apply(this, arguments);
         }
-        return nativeMediaPause.apply(this, arguments);
+
+        // Bỏ qua tất cả các lệnh pause do YouTube tự gọi khi thu nhỏ PiP hoặc tắt màn hình!
+        console.log('[BraveShield] Đã chặn lệnh tự dừng video do kích thước nhỏ hoặc chạy nền!');
+        return;
     };
 
     // ==============================================================
-    // 4. ĐỒNG BỘ TRẠNG THÁI PHÁT
+    // 4. CƠ CHẾ VIDEO POPUP PIP THỰC THỤ (CÔ LẬP THẺ VIDEO KHỎI TRANG WEB)
+    // ==============================================================
+    window.__enterPipMode = function() {
+        console.log('[BraveShield] Bật chế độ Video Popup PiP thực thụ...');
+        document.documentElement.classList.add('pip-active');
+        document.body.classList.add('pip-active');
+
+        const video = document.querySelector('video');
+        if (video) {
+            // Xóa bỏ thuộc tính transform của tất cả thẻ cha để thẻ video có thể bung tràn màn hình
+            let parent = video.parentElement;
+            while (parent && parent !== document.body) {
+                parent.style.transform = 'none';
+                parent.style.webkitTransform = 'none';
+                parent = parent.parentElement;
+            }
+
+            // Ép thẻ video tràn 100% khung hình PiP và đè lên toàn bộ các thành phần web
+            video.style.cssText = 'position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;z-index:2147483647!important;object-fit:contain!important;background:#000000!important;';
+        }
+    };
+
+    window.__exitPipMode = function() {
+        console.log('[BraveShield] Thoát chế độ Video Popup PiP...');
+        document.documentElement.classList.remove('pip-active');
+        document.body.classList.remove('pip-active');
+
+        const video = document.querySelector('video');
+        if (video) {
+            video.style.cssText = '';
+            let parent = video.parentElement;
+            while (parent && parent !== document.body) {
+                parent.style.transform = '';
+                parent.style.webkitTransform = '';
+                parent = parent.parentElement;
+            }
+        }
+    };
+
+    // ==============================================================
+    // 5. ĐỒNG BỘ TRẠNG THÁI PHÁT VỚI ANDROID NATIVE
     // ==============================================================
     function syncNativeState() {
         if (!window.AndroidBridge) return;

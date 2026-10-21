@@ -69,7 +69,6 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Đăng ký nhận sự kiện điều khiển từ cửa sổ nổi PiP
         val filter = IntentFilter().apply {
             addAction(ACTION_PIP_PLAY)
             addAction(ACTION_PIP_PAUSE)
@@ -128,7 +127,6 @@ class MainActivity : AppCompatActivity() {
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
-        // Đảm bảo bàn phím Android hoạt động khi bấm vào ô tìm kiếm
         webView.isFocusable = true
         webView.isFocusableInTouchMode = true
         webView.requestFocus(View.FOCUS_DOWN)
@@ -214,17 +212,12 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    /**
-     * Cập nhật thông số PiP với nút Play hoặc Pause riêng biệt
-     */
     private fun updatePipParams() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
                 val builder = PictureInPictureParams.Builder()
                     .setAspectRatio(Rational(16, 9))
 
-                // Nếu đang phát -> hiện nút PAUSE để bấm tạm dừng
-                // Nếu đang dừng -> hiện nút PLAY để bấm phát
                 val actionIntent = if (isVideoPlaying) {
                     Intent(ACTION_PIP_PAUSE).setPackage(packageName)
                 } else {
@@ -261,7 +254,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Xử lý khi người dùng bấm nút PLAY trên PiP: Chắc chắn gọi play()
+    // Xử lý khi người dùng bấm nút PLAY trên PiP: Gọi play()
     private fun handlePipPlay() {
         isVideoPlaying = true
         updatePipParams()
@@ -278,13 +271,14 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    // Xử lý khi người dùng bấm nút PAUSE trên PiP: Chắc chắn gọi pause()
+    // Xử lý khi người dùng bấm nút PAUSE trên PiP: Cho phép pause tường minh
     private fun handlePipPause() {
         isVideoPlaying = false
         updatePipParams()
         webView.evaluateJavascript(
             """
             (function() {
+                window.__isUserExplicitPause = true;
                 const v = document.querySelector('video');
                 if (v) {
                     v.pause();
@@ -300,7 +294,8 @@ class MainActivity : AppCompatActivity() {
         if (isVideoPlaying || isFullscreen) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 try {
-                    webView.evaluateJavascript("document.documentElement.classList.add('pip-active');") {
+                    // Kích hoạt cô lập thẻ Video tràn viền trước khi chuyển cửa sổ PiP
+                    webView.evaluateJavascript("if (window.__enterPipMode) window.__enterPipMode();") {
                         val params = PictureInPictureParams.Builder()
                             .setAspectRatio(Rational(16, 9))
                             .build()
@@ -318,17 +313,17 @@ class MainActivity : AppCompatActivity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         if (isInPictureInPictureMode) {
             progressBar.visibility = View.GONE
-            webView.evaluateJavascript("document.documentElement.classList.add('pip-active');", null)
+            webView.evaluateJavascript("if (window.__enterPipMode) window.__enterPipMode();", null)
             updatePipParams()
         } else {
-            webView.evaluateJavascript("document.documentElement.classList.remove('pip-active');", null)
+            webView.evaluateJavascript("if (window.__exitPipMode) window.__exitPipMode();", null)
         }
     }
 
     override fun onResume() {
         super.onResume()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || !isInPictureInPictureMode) {
-            webView.evaluateJavascript("document.documentElement.classList.remove('pip-active');", null)
+            webView.evaluateJavascript("if (window.__exitPipMode) window.__exitPipMode();", null)
         }
     }
 
