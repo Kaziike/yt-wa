@@ -38,7 +38,8 @@ import com.brave.youtubelite.view.KeepAliveWebView
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        private const val ACTION_PIP_PLAY_PAUSE = "com.brave.youtubelite.PIP_PLAY_PAUSE"
+        private const val ACTION_PIP_PLAY = "com.brave.youtubelite.PIP_PLAY"
+        private const val ACTION_PIP_PAUSE = "com.brave.youtubelite.PIP_PAUSE"
     }
 
     private lateinit var webView: KeepAliveWebView
@@ -53,11 +54,12 @@ class MainActivity : AppCompatActivity() {
     private var currentTitle = "YouTube Lite"
     private var currentChannel = ""
 
-    // Receiver lắng nghe nút Bấm Play/Pause ngay trên cửa sổ nổi PiP
+    // Receiver lắng nghe nút Play và Pause riêng biệt trên PiP
     private val pipActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == ACTION_PIP_PLAY_PAUSE) {
-                togglePlayPause()
+            when (intent?.action) {
+                ACTION_PIP_PLAY -> handlePipPlay()
+                ACTION_PIP_PAUSE -> handlePipPause()
             }
         }
     }
@@ -67,32 +69,28 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Đăng ký nhận sự kiện nút bấm từ cửa sổ nổi PiP
-        val filter = IntentFilter(ACTION_PIP_PLAY_PAUSE)
+        // Đăng ký nhận sự kiện điều khiển từ cửa sổ nổi PiP
+        val filter = IntentFilter().apply {
+            addAction(ACTION_PIP_PLAY)
+            addAction(ACTION_PIP_PAUSE)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(pipActionReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
             registerReceiver(pipActionReceiver, filter)
         }
 
-        // Xin quyền thông báo trên Android 13+
         requestNotificationPermission()
 
-        // 1. Khởi tạo Engine lọc quảng cáo
         AdBlockEngine.init(applicationContext)
 
-        // 2. Ánh xạ View
         webView = findViewById(R.id.webView)
         progressBar = findViewById(R.id.progressBar)
         customViewContainer = findViewById(R.id.customViewContainer)
 
-        // 3. Cấu hình WebView
         setupWebView()
-
-        // 4. Xử lý nút Back
         setupBackPressedHandler()
 
-        // 5. Tải YouTube Mobile
         val targetUrl = intent?.dataString ?: "https://m.youtube.com"
         webView.loadUrl(targetUrl)
     }
@@ -130,7 +128,7 @@ class MainActivity : AppCompatActivity() {
 
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
-        // ĐẢM BẢO BÀN PHÍM HOẠT ĐỘNG: Bật focusable và bắt touch để kích hoạt bàn phím ảo
+        // Đảm bảo bàn phím Android hoạt động khi bấm vào ô tìm kiếm
         webView.isFocusable = true
         webView.isFocusableInTouchMode = true
         webView.requestFocus(View.FOCUS_DOWN)
@@ -217,13 +215,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Cập nhật thông số PiP với tỉ lệ chuẩn 16:9 và nút điều khiển Native
+     * Cập nhật thông số PiP với nút Play hoặc Pause riêng biệt
      */
     private fun updatePipParams() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
                 val builder = PictureInPictureParams.Builder()
                     .setAspectRatio(Rational(16, 9))
+
+                // Nếu đang phát -> hiện nút PAUSE để bấm tạm dừng
+                // Nếu đang dừng -> hiện nút PLAY để bấm phát
+                val actionIntent = if (isVideoPlaying) {
+                    Intent(ACTION_PIP_PAUSE).setPackage(packageName)
+                } else {
+                    Intent(ACTION_PIP_PLAY).setPackage(packageName)
+                }
 
                 val iconRes = if (isVideoPlaying) {
                     android.R.drawable.ic_media_pause
@@ -232,11 +238,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 val actionTitle = if (isVideoPlaying) "Tạm dừng" else "Phát"
 
-                val intent = Intent(ACTION_PIP_PLAY_PAUSE).setPackage(packageName)
                 val pendingIntent = PendingIntent.getBroadcast(
                     this,
                     0,
-                    intent,
+                    actionIntent,
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
@@ -256,13 +261,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun togglePlayPause() {
+    // Xử lý khi người dùng bấm nút PLAY trên PiP: Chắc chắn gọi play()
+    private fun handlePipPlay() {
+        isVideoPlaying = true
+        updatePipParams()
         webView.evaluateJavascript(
             """
             (function() {
                 const v = document.querySelector('video');
                 if (v) {
-                    if (v.paused) v.play(); else v.pause();
+                    v.play().catch(function() {});
+                }
+            })();
+            """.trimIndent(),
+            null
+        )
+    }
+
+    // Xử lý khi người dùng bấm nút PAUSE trên PiP: Chắc chắn gọi pause()
+    private fun handlePipPause() {
+        isVideoPlaying = false
+        updatePipParams()
+        webView.evaluateJavascript(
+            """
+            (function() {
+                const v = document.querySelector('video');
+                if (v) {
+                    v.pause();
                 }
             })();
             """.trimIndent(),
@@ -318,8 +343,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        val inPip = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) isInPictureInPictureMode else false
-        if (isVideoPlaying && !inPip) {
+        // Dù đang ở PiP hay bình thường, nếu màn hình tắt mà video đang phát -> luôn chạy MediaService để giữ âm thanh!
+        if (isVideoPlaying) {
             startMediaService()
         }
     }
@@ -372,7 +397,6 @@ class MainActivity : AppCompatActivity() {
         fun onVideoPaused() {
             runOnUiThread {
                 isVideoPlaying = false
-                stopMediaService()
                 updatePipParams()
             }
         }

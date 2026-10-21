@@ -15,7 +15,7 @@ import java.io.InputStream
  * WebViewClient tích hợp cơ chế:
  * 1. Chặn request mạng bằng AdBlockEngine
  * 2. Tiêm Scriptlet SSAI Defuser
- * 3. Tiêm bộ luật CSS Cosmetic Filtering
+ * 3. Tiêm bộ luật CSS Cosmetic Filtering an toàn (hỗ trợ cả document.documentElement khi head chưa sẵn sàng)
  */
 class AppWebViewClient(private val context: Context) : WebViewClient() {
 
@@ -29,11 +29,9 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
 
     private fun loadAssets() {
         try {
-            // Đọc file Scriptlet JS
             val jsStream: InputStream = context.assets.open("scriptlets/youtube_defuser.js")
             scriptletCode = jsStream.bufferedReader().use { it.readText() }
 
-            // Đọc file CSS Cosmetic
             val cssStream: InputStream = context.assets.open("filters/cosmetic_rules.css")
             cosmeticCss = cssStream.bufferedReader().use { it.readText() }
         } catch (e: Exception) {
@@ -47,10 +45,8 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
     ): WebResourceResponse? {
         val url = request?.url.toString()
 
-        // Kiểm tra qua bộ lọc mạng Brave Shields Native
         if (AdBlockEngine.isBlocked(url)) {
             Log.d(tag, "🛡️ [Blocked]: $url")
-            // Trả về response rỗng để hủy request ngay lập tức
             return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
         }
 
@@ -59,13 +55,11 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
-        // Tiêm scriptlet và CSS càng sớm càng tốt khi trang vừa bắt đầu nạp
         injectShields(view)
     }
 
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
-        // Tiêm lại lần 2 để bảo đảm các phần tử dynamic nạp sau vẫn bị can thiệp
         injectShields(view)
     }
 
@@ -77,18 +71,22 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
             webView.evaluateJavascript(scriptletCode, null)
         }
 
-        // 2. Tiêm CSS Cosmetic Filter
+        // 2. Tiêm CSS Cosmetic Filter (dùng document.head || document.documentElement để không bị lỗi null)
         if (cosmeticCss.isNotEmpty()) {
             val encodedCss = Base64.encodeToString(cosmeticCss.toByteArray(), Base64.NO_WRAP)
             val injectCssJs = """
                 (function() {
                     const styleId = '__brave_cosmetic_style';
-                    if (!document.getElementById(styleId)) {
-                        const style = document.createElement('style');
+                    let style = document.getElementById(styleId);
+                    if (!style) {
+                        style = document.createElement('style');
                         style.id = styleId;
                         style.type = 'text/css';
                         style.innerHTML = window.atob('$encodedCss');
-                        document.head.appendChild(style);
+                        const target = document.head || document.documentElement;
+                        if (target) {
+                            target.appendChild(style);
+                        }
                     }
                 })();
             """.trimIndent()
