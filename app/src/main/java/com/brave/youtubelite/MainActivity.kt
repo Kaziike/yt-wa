@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.util.Rational
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -232,7 +233,7 @@ class MainActivity : AppCompatActivity() {
         configureWebSettings(webView)
 
         webView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
-        val browseClient = AppWebViewClient(applicationContext).apply {
+        val browseClient = AppWebViewClient(applicationContext, isBrowseMode = true).apply {
             onInterceptWatchUrl = { url ->
                 // Nếu bấm vào video thông thường (/watch?v=... trừ Shorts): Mở lớp phát đè lên!
                 if (url.contains("/watch") && !url.contains("/shorts/")) {
@@ -272,7 +273,7 @@ class MainActivity : AppCompatActivity() {
         configureWebSettings(playerWebView)
 
         playerWebView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
-        val playerClient = AppWebViewClient(applicationContext)
+        val playerClient = AppWebViewClient(applicationContext, isBrowseMode = false)
         playerClient.installDocumentStartScripts(playerWebView)
         playerWebView.webViewClient = playerClient
 
@@ -304,7 +305,7 @@ class MainActivity : AppCompatActivity() {
             collapsePlayer()
         }
 
-        // Kéo vuốt trên vùng video để thu nhỏ (Swipe Down)
+        // Kéo vuốt trên dải mép trên video để thu nhỏ (Swipe Down)
         var startY = 0f
         var isDragging = false
         playerDragArea.setOnTouchListener { _, event ->
@@ -317,7 +318,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val deltaY = event.rawY - startY
-                    if (deltaY > dpToPx(10f) || isDragging) {
+                    if (deltaY > dpToPx(12f) || isDragging) {
                         isDragging = true
                         if (deltaY > 0) {
                             playerPanel.translationY = deltaY
@@ -328,7 +329,7 @@ class MainActivity : AppCompatActivity() {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (isDragging) {
                         val deltaY = event.rawY - startY
-                        if (deltaY > dpToPx(100f)) {
+                        if (deltaY > dpToPx(80f)) {
                             collapsePlayer()
                         } else {
                             expandPlayer()
@@ -336,7 +337,9 @@ class MainActivity : AppCompatActivity() {
                         isDragging = false
                         true
                     } else {
-                        false
+                        // Click nhẹ vào vùng dải trên cùng: thu nhỏ player
+                        collapsePlayer()
+                        true
                     }
                 }
                 else -> false
@@ -387,19 +390,37 @@ class MainActivity : AppCompatActivity() {
      * Tự động bung to lên toàn màn hình (EXPANDED), trang chủ bên dưới giữ nguyên vẹn 100%!
      */
     fun openVideoPlayer(url: String) {
-        panelState = PanelState.EXPANDED
-        playerPanel.visibility = View.VISIBLE
-        playerPanel.translationY = 0f
+        if (url.isEmpty()) return
+        runOnUiThread {
+            panelState = PanelState.EXPANDED
 
-        playerWebView.translationX = 0f
-        playerWebView.scaleX = 1f
-        playerWebView.scaleY = 1f
+            val params = playerPanel.layoutParams as FrameLayout.LayoutParams
+            params.height = ViewGroup.LayoutParams.MATCH_PARENT
+            params.gravity = Gravity.TOP
+            playerPanel.layoutParams = params
+            playerPanel.setBackgroundColor(Color.BLACK)
 
-        miniPlayerBar.visibility = View.GONE
-        btnMinimizePlayer.visibility = View.VISIBLE
-        playerDragArea.visibility = View.VISIBLE
+            playerPanel.visibility = View.VISIBLE
+            playerPanel.translationY = 0f
 
-        playerWebView.loadUrl(url)
+            playerWebView.pivotX = 0f
+            playerWebView.pivotY = 0f
+            playerWebView.scaleX = 1f
+            playerWebView.scaleY = 1f
+            playerWebView.translationX = 0f
+            playerWebView.translationY = 0f
+
+            miniPlayerBar.visibility = View.GONE
+            btnMinimizePlayer.visibility = View.VISIBLE
+            playerDragArea.visibility = View.VISIBLE
+
+            val fullUrl = if (url.startsWith("http://") || url.startsWith("https://")) {
+                url
+            } else {
+                "https://m.youtube.com" + (if (url.startsWith("/")) "" else "/") + url
+            }
+            playerWebView.loadUrl(fullUrl)
+        }
     }
 
     /**
@@ -409,28 +430,41 @@ class MainActivity : AppCompatActivity() {
         if (panelState == PanelState.COLLAPSED || panelState == PanelState.HIDDEN) return
         panelState = PanelState.COLLAPSED
 
-        val targetY = (mainContainer.height - dpToPx(64f)).coerceAtLeast(0f)
+        val miniH = dpToPx(64f)
+        val targetY = (mainContainer.height - miniH).coerceAtLeast(0f)
         val miniW = dpToPx(104f)
         val screenW = mainContainer.width.toFloat().coerceAtLeast(1f)
         val scale = miniW / screenW
+
+        miniPlayerBar.visibility = View.VISIBLE
+        miniPlayerBar.alpha = 1f
+        btnMinimizePlayer.visibility = View.GONE
+        playerDragArea.visibility = View.GONE
 
         playerPanel.animate()
             .translationY(targetY)
             .setDuration(260)
             .setInterpolator(DecelerateInterpolator())
-            .withStartAction {
-                miniPlayerBar.visibility = View.VISIBLE
-                miniPlayerBar.alpha = 1f
-                btnMinimizePlayer.visibility = View.GONE
-                playerDragArea.visibility = View.GONE
+            .withEndAction {
+                // Thu gọn kích thước playerPanel xuống đúng 64dp ở đáy để giải phóng hoàn toàn touch cho trang chủ bên dưới
+                val params = playerPanel.layoutParams as FrameLayout.LayoutParams
+                params.height = miniH.toInt()
+                params.gravity = Gravity.BOTTOM
+                playerPanel.layoutParams = params
+                playerPanel.translationY = 0f
+                playerPanel.setBackgroundColor(Color.TRANSPARENT)
             }
             .start()
 
+        playerWebView.pivotX = 0f
+        playerWebView.pivotY = 0f
         playerWebView.animate()
             .scaleX(scale)
             .scaleY(scale)
-            .translationX(dpToPx(6f))
+            .translationX(dpToPx(4f))
+            .translationY(dpToPx(3f))
             .setDuration(260)
+            .setInterpolator(DecelerateInterpolator())
             .start()
     }
 
@@ -441,22 +475,36 @@ class MainActivity : AppCompatActivity() {
         if (panelState == PanelState.EXPANDED || panelState == PanelState.HIDDEN) return
         panelState = PanelState.EXPANDED
 
+        val miniH = dpToPx(64f)
+        val targetY = (mainContainer.height - miniH).coerceAtLeast(0f)
+
+        // Phục hồi layoutParams MATCH_PARENT nhưng bắt đầu từ vị trí đáy
+        val params = playerPanel.layoutParams as FrameLayout.LayoutParams
+        params.height = ViewGroup.LayoutParams.MATCH_PARENT
+        params.gravity = Gravity.TOP
+        playerPanel.layoutParams = params
+        playerPanel.translationY = targetY
+        playerPanel.setBackgroundColor(Color.BLACK)
+
+        miniPlayerBar.visibility = View.GONE
+        btnMinimizePlayer.visibility = View.VISIBLE
+        playerDragArea.visibility = View.VISIBLE
+
         playerPanel.animate()
             .translationY(0f)
             .setDuration(260)
             .setInterpolator(DecelerateInterpolator())
-            .withStartAction {
-                miniPlayerBar.visibility = View.GONE
-                btnMinimizePlayer.visibility = View.VISIBLE
-                playerDragArea.visibility = View.VISIBLE
-            }
             .start()
 
+        playerWebView.pivotX = 0f
+        playerWebView.pivotY = 0f
         playerWebView.animate()
             .scaleX(1f)
             .scaleY(1f)
             .translationX(0f)
+            .translationY(0f)
             .setDuration(260)
+            .setInterpolator(DecelerateInterpolator())
             .start()
     }
 
@@ -467,11 +515,19 @@ class MainActivity : AppCompatActivity() {
         if (panelState == PanelState.HIDDEN) return
         panelState = PanelState.HIDDEN
 
+        val targetY = mainContainer.height.toFloat()
         playerPanel.animate()
-            .translationY(mainContainer.height.toFloat())
+            .translationY(targetY)
             .setDuration(200)
             .withEndAction {
                 playerPanel.visibility = View.GONE
+                val params = playerPanel.layoutParams as FrameLayout.LayoutParams
+                params.height = ViewGroup.LayoutParams.MATCH_PARENT
+                params.gravity = Gravity.TOP
+                playerPanel.layoutParams = params
+                playerPanel.translationY = 0f
+                playerPanel.setBackgroundColor(Color.BLACK)
+
                 playerWebView.loadUrl("about:blank")
                 isVideoPlaying = false
                 stopMediaService()
@@ -884,6 +940,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     inner class MediaBridge {
+        @JavascriptInterface
+        fun openWatchLayer(url: String) {
+            if (url.isNotEmpty()) {
+                runOnUiThread {
+                    openVideoPlayer(url)
+                }
+            }
+        }
+
         @JavascriptInterface
         fun openSettings() {
             runOnUiThread {

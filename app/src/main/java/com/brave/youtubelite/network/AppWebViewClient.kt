@@ -20,7 +20,10 @@ import java.io.ByteArrayInputStream
  * 3. Tiêm bộ luật CSS Cosmetic Filtering bằng textContent (Trusted Types CSP)
  * 4. Nhét mục "Cài đặt YouTube Lite" vào trong trang select_site (giữ nguyên trang gốc, không ghi đè)
  */
-open class AppWebViewClient(private val context: Context) : WebViewClient() {
+open class AppWebViewClient(
+    private val context: Context,
+    val isBrowseMode: Boolean = false
+) : WebViewClient() {
 
     private val tag = "AppWebViewClient"
     var onPageFinishedCallback: ((url: String?) -> Unit)? = null
@@ -29,6 +32,99 @@ open class AppWebViewClient(private val context: Context) : WebViewClient() {
     private var pipControllerCode: String = ""
     private var scriptletCode: String = ""
     private var injectCssJs: String = ""
+
+    private val browseWatchInterceptorJs: String = """
+        (function() {
+            if (window.__braveWatchInterceptorInstalled) return;
+            window.__braveWatchInterceptorInstalled = true;
+
+            function isWatchUrl(url) {
+                if (!url || typeof url !== 'string') return false;
+                return url.indexOf('/watch') !== -1 && url.indexOf('/shorts/') === -1;
+            }
+
+            function dispatchWatchUrl(url) {
+                if (!url || typeof url !== 'string') return false;
+                var fullUrl = url;
+                if (fullUrl.indexOf('http') !== 0) {
+                    var origin = window.location.origin || 'https://m.youtube.com';
+                    fullUrl = origin + (fullUrl.indexOf('/') === 0 ? '' : '/') + fullUrl;
+                }
+                if (isWatchUrl(fullUrl)) {
+                    if (window.AndroidBridge && typeof window.AndroidBridge.openWatchLayer === 'function') {
+                        window.AndroidBridge.openWatchLayer(fullUrl);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // 1. Hook history.pushState & replaceState (Lưới an toàn bắt SPA Router của YouTube)
+            try {
+                var origPushState = history.pushState;
+                history.pushState = function(state, title, url) {
+                    if (url && isWatchUrl(String(url))) {
+                        if (dispatchWatchUrl(String(url))) {
+                            return; // Ngăn browse webview chuyển sang URL watch
+                        }
+                    }
+                    return origPushState.apply(history, arguments);
+                };
+
+                var origReplaceState = history.replaceState;
+                history.replaceState = function(state, title, url) {
+                    if (url && isWatchUrl(String(url))) {
+                        if (dispatchWatchUrl(String(url))) {
+                            return;
+                        }
+                    }
+                    return origReplaceState.apply(history, arguments);
+                };
+            } catch(e) {}
+
+            // 2. Bắt sự kiện click ở Capture Phase (useCapture = true) đón đầu mọi touch/click
+            function onDocClick(e) {
+                try {
+                    var el = e.target;
+                    if (!el) return;
+
+                    var anchor = el.closest ? el.closest('a') : null;
+                    if (anchor && anchor.href && isWatchUrl(anchor.href)) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        dispatchWatchUrl(anchor.href);
+                        return false;
+                    }
+
+                    var videoContainer = el.closest ? el.closest('ytm-compact-video-renderer, ytm-video-with-context-renderer, ytm-rich-item-renderer, ytm-item-section-renderer, ytm-media-item') : null;
+                    if (videoContainer) {
+                        var innerA = videoContainer.querySelector('a[href*="/watch"]');
+                        if (innerA && innerA.href && isWatchUrl(innerA.href)) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.stopImmediatePropagation();
+                            dispatchWatchUrl(innerA.href);
+                            return false;
+                        }
+                    }
+                } catch(err) {}
+            }
+
+            document.addEventListener('click', onDocClick, true);
+
+            // 3. Lắng nghe yt-navigate Polymer event
+            window.addEventListener('yt-navigate', function(e) {
+                try {
+                    if (e && e.detail && e.detail.url && isWatchUrl(e.detail.url)) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dispatchWatchUrl(e.detail.url);
+                    }
+                } catch(err) {}
+            }, true);
+        })();
+    """.trimIndent()
 
     private val selectSiteSettingsScriptletJs: String = """
         (function() {
@@ -198,6 +294,9 @@ open class AppWebViewClient(private val context: Context) : WebViewClient() {
                 if (selectSiteSettingsScriptletJs.isNotEmpty()) {
                     WebViewCompat.addDocumentStartJavaScript(webView, selectSiteSettingsScriptletJs, origins)
                 }
+                if (isBrowseMode && browseWatchInterceptorJs.isNotEmpty()) {
+                    WebViewCompat.addDocumentStartJavaScript(webView, browseWatchInterceptorJs, origins)
+                }
             }
         } catch (e: Exception) {
             Log.e(tag, "Không thể đăng ký document-start script: ${e.message}")
@@ -276,6 +375,9 @@ open class AppWebViewClient(private val context: Context) : WebViewClient() {
         }
         if (selectSiteSettingsScriptletJs.isNotEmpty()) {
             webView.evaluateJavascript(selectSiteSettingsScriptletJs, null)
+        }
+        if (isBrowseMode && browseWatchInterceptorJs.isNotEmpty()) {
+            webView.evaluateJavascript(browseWatchInterceptorJs, null)
         }
         // Đồng bộ cấu hình từ AppSettings xuống tầng JS
         val settingsJson = AppSettings.toJson(context)
