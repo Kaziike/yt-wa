@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "YouTubeLite"
+rootProject.name = "LiteTube"
 include(":app")

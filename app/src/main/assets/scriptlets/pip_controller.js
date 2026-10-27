@@ -1,5 +1,5 @@
 /**
- * BRAVE PIP CONTROLLER - YOUTUBE LITE
+ * BRAVE PIP CONTROLLER - LITETUBE
  * Bộ điều khiển Video Popup (PiP) & Media Control độc lập.
  *
  * 1. Cô lập video tuyệt đối khi vào PiP:

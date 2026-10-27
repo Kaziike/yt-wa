@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">YouTube Lite</string>
+    <string name="app_name">LiteTube</string>
     <string name="desc_reload">Tải lại trang</string>
     <string name="desc_settings">Cài đặt</string>
-    <string name="settings_title">Cài đặt YouTube Lite</string>
+    <string name="settings_title">Cài đặt LiteTube</string>
     <string name="settings_version">Phiên bản 1.0.0</string>
     <string name="setting_adblock_title">Chặn quảng cáo &amp; Tua SSAI 16x</string>
     <string name="setting_adblock_desc">Chặn tên miền quảng cáo và tự động bỏ qua quảng cáo ghép luồng</string>

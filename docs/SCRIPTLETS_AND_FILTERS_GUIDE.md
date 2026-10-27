@@ -1,6 +1,6 @@
-# Hướng Dẫn Scriptlets & Bộ Lọc Web (Scriptlets & Filters Guide)
+﻿# Hướng Dẫn Scriptlets & Bộ Lọc Web (Scriptlets & Filters Guide)
 
-Tài liệu này phân tích chi tiết cơ chế hoạt động của các thành phần Web Shields và Scriptlets được nạp vào Chromium Web Engine của ứng dụng **YouTube Lite**.
+Tài liệu này phân tích chi tiết cơ chế hoạt động của các thành phần Web Shields và Scriptlets được nạp vào Chromium Web Engine của ứng dụng **LiteTube**.
 
 ---
 
@@ -98,10 +98,10 @@ html[data-brave-pip-mode] video[data-brave-pip-role="video"] {
 ## 3. `selectSiteSettingsScriptletJs` (Tích Hợp Cài Đặt Vào Trang `select_site`)
 
 - **Vị trí tích hợp:** Khai báo trong `AppWebViewClient.kt`.
-- **Mục tiêu:** Nhét mục "Cài đặt YouTube Lite" vào đầu danh sách cài đặt của YouTube tại `https://m.youtube.com/select_site` mà không làm thay đổi thanh công cụ mặc định của YouTube.
+- **Mục tiêu:** Nhét mục "Cài đặt LiteTube" vào đầu danh sách cài đặt của YouTube tại `https://m.youtube.com/select_site` mà không làm thay đổi thanh công cụ mặc định của YouTube.
 - **Cơ chế:**
   - Giám sát DOM bằng `MutationObserver` khi URL khớp `select_site`.
-  - Tạo phần tử HTML hàng danh sách có biểu tượng bánh răng SVG và nhãn "Cài đặt YouTube Lite".
+  - Tạo phần tử HTML hàng danh sách có biểu tượng bánh răng SVG và nhãn "Cài đặt LiteTube".
   - Khi người dùng chạm vào, gọi `window.AndroidBridge.openSettings()` để mở `BottomSheetDialog` Native.
 
 ---

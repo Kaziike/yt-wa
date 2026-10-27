@@ -1,5 +1,5 @@
 /**
- * BRAVE SHIELDS SCRIPTLET DÀNH CHO YOUTUBE LITE
+ * BRAVE SHIELDS SCRIPTLET DÀNH CHO LITETUBE
  * 1. Chặn và gọt sạch metadata quảng cáo (InnerTube & SSAI 16x)
  * 2. Cơ chế chạy nền & Chống tự động ngắt video khi ở kích thước nhỏ (PLAYER_VIEW_TOO_SMALL)
  * 3. Chế độ Video Popup PiP: xem scriptlets/pip_controller.js (được Kotlin chèn riêng)
@@ -448,7 +448,7 @@
         );
         const rawTitle = titleEl && titleEl.innerText ? titleEl.innerText.trim() : '';
         const docTitle = document.title ? document.title.replace(/\s*-\s*YouTube$/i, '').trim() : '';
-        const title = rawTitle || docTitle || 'YouTube Lite';
+        const title = rawTitle || docTitle || 'LiteTube';
         const channel = channelEl && channelEl.innerText ? channelEl.innerText.trim() : '';
         return { title: title, channel: channel };
     }

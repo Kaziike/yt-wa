@@ -1,8 +1,8 @@
-# Kiến Trúc Hệ Thống (System Architecture)
+﻿# Kiến Trúc Hệ Thống (System Architecture)
 
 ## 1. Sơ Đồ Kiến Trúc Tổng Thể
 
-YouTube Lite được thiết kế theo mô hình lai (Hybrid Native-Web Architecture) kết hợp kiến trúc phòng thủ của trình duyệt **Brave Browser** và mô hình **2 Tầng View Độc Lập (Dual-Layer Native Sliding Sheet)**:
+LiteTube được thiết kế theo mô hình lai (Hybrid Native-Web Architecture) kết hợp kiến trúc phòng thủ của trình duyệt **Brave Browser** và mô hình **2 Tầng View Độc Lập (Dual-Layer Native Sliding Sheet)**:
 
 ```mermaid
 graph TD
@@ -79,7 +79,7 @@ Trên các trình duyệt di động hoặc Web wrapper đơn giản, khi ngư�
 - Trang web chuyển hoàn toàn sang URL `/watch?v=...`.
 - Khi người dùng muốn tìm video khác, họ phải nhấn Back, khiến trang chủ bị tải lại từ đầu, mất sạch vị trí cuộn và danh sách gợi ý.
 
-### Giải Pháp 2 Tầng View Độc Quyền Của YouTube Lite:
+### Giải Pháp 2 Tầng View Độc Quyền Của LiteTube:
 Hệ thống sử dụng **2 cá thể WebView độc lập** được điều phối bởi Native Android:
 
 ```

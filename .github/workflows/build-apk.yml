@@ -1,4 +1,4 @@
-name: Build YouTube Lite APK
+name: Build LiteTube APK
 
 on:
   push:
@@ -33,6 +33,6 @@ jobs:
       - name: Tải file APK lên Artifacts để tải về điện thoại
         uses: actions/upload-artifact@v4
         with:
-          name: YouTubeLite-Debug-APK
+          name: LiteTube-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14

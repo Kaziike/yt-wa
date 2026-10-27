@@ -1,6 +1,6 @@
-# Giao Diện Giao Tiếp & Lưu Trữ (API & Storage)
+﻿# Giao Diện Giao Tiếp & Lưu Trữ (API & Storage)
 
-Tài liệu này mô tả các giao thức giao tiếp liên tiến trình (IPC), giao diện JavaScript $\leftrightarrow$ Native, Broadcast Intents, MediaSession Actions và cơ chế lưu trữ dữ liệu của ứng dụng **YouTube Lite**.
+Tài liệu này mô tả các giao thức giao tiếp liên tiến trình (IPC), giao diện JavaScript $\leftrightarrow$ Native, Broadcast Intents, MediaSession Actions và cơ chế lưu trữ dữ liệu của ứng dụng **LiteTube**.
 
 ---
 
@@ -17,7 +17,7 @@ view.addJavascriptInterface(MediaBridge(), "AndroidBridge")
 | Phương Thức | Tham Số | Mục Đích | Luồng Xử Lý Phía Native |
 | :--- | :--- | :--- | :--- |
 | `openWatchLayer(url)` | `url: String` | Browse View thông báo người dùng bấm vào video hoặc pushState URL `/watch`. | Gọi `runOnUiThread { openVideoPlayer(url) }`, bung `playerPanel` lên toàn màn hình và nạp video vào `playerWebView`. |
-| `openSettings()` | *(Không có)* | Web thông báo người dùng bấm vào mục "Cài đặt YouTube Lite" trong trang `select_site`. | Gọi `runOnUiThread { showSettingsDialog() }`, mở BottomSheet Cài đặt Native. |
+| `openSettings()` | *(Không có)* | Web thông báo người dùng bấm vào mục "Cài đặt LiteTube" trong trang `select_site`. | Gọi `runOnUiThread { showSettingsDialog() }`, mở BottomSheet Cài đặt Native. |
 | `onVideoPlaying(title, channel)` | `title: String`<br>`channel: String` | Web thông báo video bắt đầu phát. | Chuyển sang luồng UI, cập nhật `isVideoPlaying = true`, tiêu đề, tên kênh trên MiniPlayer Bar, PiP và Notification. |
 | `onVideoPaused()` | *(Không có)* | Web thông báo video đã dừng. | Chuyển sang luồng UI, cập nhật `isVideoPlaying = false`, đổi icon sang Play trên MiniPlayer Bar, PiP và Notification. |
 | `onMediaStateChanged(...)` | `playing: Boolean`<br>`title: String`<br>`channel: String`<br>`posMs: Long`<br>`durMs: Long` | Web đồng bộ toàn diện trạng thái phát, thời gian hiện tại và tổng thời lượng. | Cập nhật `MediaSessionCompat` (tiến trình thanh tua LockScreen/Notification) và `MediaService`. |
@@ -48,10 +48,10 @@ private fun runPipCommand(method: String, onResult: ((String?) -> Unit)? = null)
 ## 2. Hệ Thống Broadcast Intents & Service Actions
 
 ### A. PiP Actions
-- `com.brave.youtubelite.PIP_PLAY`:
+- `com.brave.LiteTube.PIP_PLAY`:
   - **Mã yêu cầu (Request Code):** `1001`
   - **Icon:** `android.R.drawable.ic_media_play`
-- `com.brave.youtubelite.PIP_PAUSE`:
+- `com.brave.LiteTube.PIP_PAUSE`:
   - **Mã yêu cầu (Request Code):** `1002`
   - **Icon:** `android.R.drawable.ic_media_pause`
 

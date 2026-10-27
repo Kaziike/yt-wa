@@ -1,6 +1,6 @@
-# Quy Tắc Cập Nhật & Duy Trì Tài Liệu (Documentation Rules)
+﻿# Quy Tắc Cập Nhật & Duy Trì Tài Liệu (Documentation Rules)
 
-Tài liệu này quy định quy trình bắt buộc dành cho các lập trình viên hoặc AI Agent khi thực hiện bất kỳ thay đổi nào trong mã nguồn dự án **YouTube Lite**, nhằm đảm bảo tài liệu trong `docs/` luôn phản ánh chính xác trạng thái thực tế.
+Tài liệu này quy định quy trình bắt buộc dành cho các lập trình viên hoặc AI Agent khi thực hiện bất kỳ thay đổi nào trong mã nguồn dự án **LiteTube**, nhằm đảm bảo tài liệu trong `docs/` luôn phản ánh chính xác trạng thái thực tế.
 
 ---
 

@@ -91,7 +91,7 @@ class MainActivity : AppCompatActivity() {
 
     private var panelState = PanelState.HIDDEN
     private var isVideoPlaying = false
-    private var currentTitle = "YouTube Lite"
+    private var currentTitle = "LiteTube"
     private var currentChannel = ""
     private var positionMs: Long = 0L
     private var durationMs: Long = -1L

@@ -56,7 +56,7 @@ class MediaService : Service() {
     private var isForeground = false
     private var isSessionReleased = false
 
-    private var currentTitle = "YouTube Lite"
+    private var currentTitle = "LiteTube"
     private var currentChannel = "Đang phát âm thanh trong nền"
     private var isPlaying = true
     private var positionMs = 0L
@@ -71,10 +71,10 @@ class MediaService : Service() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
-            "YouTubeLite:PlaybackWakeLock"
+            "LiteTube:PlaybackWakeLock"
         )
 
-        mediaSession = MediaSessionCompat(this, "YouTubeLiteMediaSession").apply {
+        mediaSession = MediaSessionCompat(this, "LiteTubeMediaSession").apply {
             isActive = true
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() {
@@ -176,9 +176,9 @@ class MediaService : Service() {
         if (isSessionReleased) return
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentChannel.ifEmpty { "YouTube Lite" })
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentChannel.ifEmpty { "LiteTube" })
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, currentTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, currentChannel.ifEmpty { "YouTube Lite" })
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, currentChannel.ifEmpty { "LiteTube" })
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, if (durationMs > 0) durationMs else -1L)
             .build()
         mediaSession.setMetadata(metadata)
@@ -265,7 +265,7 @@ class MediaService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(currentTitle)
-            .setContentText(currentChannel.ifEmpty { "YouTube Lite" })
+            .setContentText(currentChannel.ifEmpty { "LiteTube" })
             .setContentIntent(contentPendingIntent)
             .setOngoing(isPlaying)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -357,10 +357,10 @@ class MediaService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val chan = NotificationChannel(
                 CHANNEL_ID,
-                "Phát nhạc nền YouTube Lite",
+                "Phát nhạc nền LiteTube",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Duy trì âm thanh YouTube khi khóa màn hình"
+                description = "Duy trì âm thanh LiteTube khi khóa màn hình"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)

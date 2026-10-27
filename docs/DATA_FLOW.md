@@ -1,6 +1,6 @@
-# Luồng Dữ Liệu & Quy Trình Tương Tác (Data Flow)
+﻿# Luồng Dữ Liệu & Quy Trình Tương Tác (Data Flow)
 
-Tài liệu này mô tả chi tiết các chuỗi sự kiện, luồng xử lý dữ liệu và giao thức IPC (Inter-Process Communication) giữa người dùng, hệ điều hành Android, Native Kotlin và Web Engine của ứng dụng **YouTube Lite**.
+Tài liệu này mô tả chi tiết các chuỗi sự kiện, luồng xử lý dữ liệu và giao thức IPC (Inter-Process Communication) giữa người dùng, hệ điều hành Android, Native Kotlin và Web Engine của ứng dụng **LiteTube**.
 
 ---
 

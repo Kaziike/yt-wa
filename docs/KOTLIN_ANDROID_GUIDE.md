@@ -1,6 +1,6 @@
-# Hướng Dẫn Chi Tiết Tầng Native Android (Kotlin)
+﻿# Hướng Dẫn Chi Tiết Tầng Native Android (Kotlin)
 
-Tài liệu này phân tích chi tiết logic lập trình, kiến trúc hướng đối tượng và các kỹ thuật chuyên sâu được áp dụng trong tầng mã nguồn Native Kotlin của ứng dụng **YouTube Lite**.
+Tài liệu này phân tích chi tiết logic lập trình, kiến trúc hướng đối tượng và các kỹ thuật chuyên sâu được áp dụng trong tầng mã nguồn Native Kotlin của ứng dụng **LiteTube**.
 
 ---
 

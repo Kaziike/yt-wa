@@ -1,6 +1,6 @@
-# Tài Liệu Kỹ Thuật YouTube Lite (Brave Shields Architecture)
+﻿# Tài Liệu Kỹ Thuật LiteTube (Brave Shields Architecture)
 
-Chào mừng bạn đến với hệ thống tài liệu kỹ thuật toàn diện của dự án **YouTube Lite**. Tài liệu này được biên soạn cho các kỹ sư phần mềm, kiến trúc sư Android và AI Agent nhằm hiểu rõ toàn bộ kiến trúc, luồng hoạt động, logic mã nguồn và quy trình bảo trì ứng dụng mà không cần phải phân tích lại từ đầu.
+Chào mừng bạn đến với hệ thống tài liệu kỹ thuật toàn diện của dự án **LiteTube**. Tài liệu này được biên soạn cho các kỹ sư phần mềm, kiến trúc sư Android và AI Agent nhằm hiểu rõ toàn bộ kiến trúc, luồng hoạt động, logic mã nguồn và quy trình bảo trì ứng dụng mà không cần phải phân tích lại từ đầu.
 
 ---
 

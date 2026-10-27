@@ -1,6 +1,6 @@
-# Hướng Dẫn Phát Triển & Đóng Gói (Development Guide)
+﻿# Hướng Dẫn Phát Triển & Đóng Gói (Development Guide)
 
-Tài liệu này cung cấp hướng dẫn từng bước để thiết lập môi trường, biên dịch, gỡ lỗi và mở rộng các chức năng trong dự án **YouTube Lite**.
+Tài liệu này cung cấp hướng dẫn từng bước để thiết lập môi trường, biên dịch, gỡ lỗi và mở rộng các chức năng trong dự án **LiteTube**.
 
 ---
 
@@ -43,9 +43,9 @@ File APK sẽ xuất hiện tại `app/build/outputs/apk/release/app-release.apk
 
 ### C. Đóng gói tự động bằng GitHub Actions (Không cần cài SDK)
 1. Đẩy mã nguồn lên repository GitHub của bạn (nhánh `main`).
-2. Vào tab **Actions** $\rightarrow$ chọn workflow **Build YouTube Lite APK**.
+2. Vào tab **Actions** $\rightarrow$ chọn workflow **Build LiteTube APK**.
 3. Bạn có thể bấm nút **Run workflow** thủ công (`workflow_dispatch`).
-4. Khi tiến trình hoàn thành (khoảng 1.5 - 2 phút), tải file APK trong mục **Artifacts** (`YouTubeLite-Debug-APK`).
+4. Khi tiến trình hoàn thành (khoảng 1.5 - 2 phút), tải file APK trong mục **Artifacts** (`LiteTube-Debug-APK`).
 
 ---
 
@@ -70,7 +70,7 @@ Vì toàn bộ giao diện và trình phát YouTube chạy trên WebView phần 
 3. **Mở DevTools:**
    - Mở Chrome trên máy tính và truy cập: `chrome://inspect/#devices` (hoặc `brave://inspect/#devices` nếu dùng Brave).
    - Tích chọn ô **Discover USB devices**.
-   - Tìm thiết bị của bạn và bấm nút **inspect** bên dưới tab `YouTube Lite`.
+   - Tìm thiết bị của bạn và bấm nút **inspect** bên dưới tab `LiteTube`.
    - Một cửa sổ DevTools sẽ bật lên cho phép bạn xem toàn bộ log JavaScript (`[BraveShield]`, `[WebConsole]`) trong tab **Console**.
 
 ---

@@ -18,7 +18,7 @@ import java.io.ByteArrayInputStream
  * 1. Chặn request mạng bằng AdBlockEngine
  * 2. Tiêm Scriptlet SSAI Defuser & PiP Controller
  * 3. Tiêm bộ luật CSS Cosmetic Filtering bằng textContent (Trusted Types CSP)
- * 4. Nhét mục "Cài đặt YouTube Lite" vào trong trang select_site (giữ nguyên trang gốc, không ghi đè)
+ * 4. Nhét mục "Cài đặt LiteTube" vào trong trang select_site (giữ nguyên trang gốc, không ghi đè)
  */
 open class AppWebViewClient(
     private val context: Context,
@@ -163,7 +163,7 @@ open class AppWebViewClient(
 
                     var title = document.createElement('div');
                     title.style.cssText = 'font-size:15px;color:#fff;font-weight:500;line-height:20px;';
-                    title.textContent = 'Cài đặt YouTube Lite';
+                    title.textContent = 'Cài đặt LiteTube';
 
                     var subtitle = document.createElement('div');
                     subtitle.style.cssText = 'font-size:12px;color:#aaa;line-height:16px;margin-top:2px;';

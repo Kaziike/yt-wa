@@ -1,6 +1,6 @@
-# Báo Cáo Nợ Kỹ Thuật & Đề Xuất Nâng Cấp (Tech Debt)
+﻿# Báo Cáo Nợ Kỹ Thuật & Đề Xuất Nâng Cấp (Tech Debt)
 
-Tài liệu này ghi nhận các vấn đề nợ kỹ thuật (Technical Debt), các điểm rủi ro tiềm ẩn và đề xuất lộ trình cải tiến cho dự án **YouTube Lite**.
+Tài liệu này ghi nhận các vấn đề nợ kỹ thuật (Technical Debt), các điểm rủi ro tiềm ẩn và đề xuất lộ trình cải tiến cho dự án **LiteTube**.
 
 ---
 

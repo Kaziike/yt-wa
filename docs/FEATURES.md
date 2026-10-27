@@ -1,6 +1,6 @@
-# Danh Sách Tính Năng & Trạng Thái Triển Khai (Features)
+﻿# Danh Sách Tính Năng & Trạng Thái Triển Khai (Features)
 
-Tài liệu này tổng hợp toàn bộ các tính năng đã được triển khai trong ứng dụng **YouTube Lite**, phân tích chi tiết dữ liệu vào/ra, file phụ trách và các lưu ý kỹ thuật khi bảo trì.
+Tài liệu này tổng hợp toàn bộ các tính năng đã được triển khai trong ứng dụng **LiteTube**, phân tích chi tiết dữ liệu vào/ra, file phụ trách và các lưu ý kỹ thuật khi bảo trì.
 
 ---
 
@@ -18,7 +18,7 @@ Tài liệu này tổng hợp toàn bộ các tính năng đã được triển 
 | **8. Bảo vệ phát PiP & Micro-Seek** | Ngăn auto-pause khi chuyển đổi PiP, đánh thức pipeline re-render của YouTube không bị kẹt nút. | **Đã triển khai** | `pip_controller.js`<br>`youtube_defuser.js`<br>`MainActivity.kt` |
 | **9. Phát âm thanh khi tắt màn hình** | Giữ âm thanh tiếp tục phát thông qua Foreground Service và WakeLock tối đa 2 giờ. | **Đã triển khai** | `MediaService.kt`<br>`MainActivity.kt`<br>`AndroidManifest.xml` |
 | **10. Kéo để tải lại (Swipe-to-Refresh)** | Kéo từ trên xuống để làm mới trang chủ mượt mà theo phong cách Dark Mode. | **Đã triển khai** | `MainActivity.kt`<br>`activity_main.xml` |
-| **11. Menu Cài đặt Native trong `select_site`** | Tích hợp mục "Cài đặt YouTube Lite" vào trang `select_site` mở BottomSheet tùy biến. | **Đã triển khai** | `MainActivity.kt`<br>`AppSettings.kt`<br>`AppWebViewClient.kt`<br>`dialog_settings.xml` |
+| **11. Menu Cài đặt Native trong `select_site`** | Tích hợp mục "Cài đặt LiteTube" vào trang `select_site` mở BottomSheet tùy biến. | **Đã triển khai** | `MainActivity.kt`<br>`AppSettings.kt`<br>`AppWebViewClient.kt`<br>`dialog_settings.xml` |
 | **12. Bộ nhớ đệm tài nguyên tĩnh (Static Cache)** | Lưu trữ cục bộ các script, font, icon tĩnh giúp tăng tốc mở trang và tiết kiệm 4G/5G. | **Đã triển khai** | `WebResourceCacheManager.kt`<br>`AppWebViewClient.kt` |
 | **13. Cosmetic Filtering (Làm sạch DOM)** | Ẩn banner quảng cáo, gợi ý cài đặt ứng dụng YouTube và hộp thoại làm phiền. | **Đã triển khai** | `cosmetic_rules.css`<br>`AppWebViewClient.kt` |
 | **14. Tự động xoay toàn màn hình** | Tự động chuyển orientation sang LANDSCAPE khi bấm nút Fullscreen của video web. | **Đã triển khai** | `MainActivity.kt`<br>`activity_main.xml` |
@@ -76,6 +76,6 @@ Tài liệu này tổng hợp toàn bộ các tính năng đã được triển 
 - **Mục đích:** Cung cấp khu vực cấu hình tiện lợi mà không làm thay đổi thanh công cụ mặc định của YouTube.
 - **Cơ chế:**
   - Scriptlet `selectSiteSettingsScriptletJs` lắng nghe URL `https://m.youtube.com/select_site` (trang Cài đặt của YouTube Mobile).
-  - Tự động chèn một mục danh sách thanh lịch "Cài đặt YouTube Lite" có icon bánh răng vào đầu danh sách cài đặt của trang.
+  - Tự động chèn một mục danh sách thanh lịch "Cài đặt LiteTube" có icon bánh răng vào đầu danh sách cài đặt của trang.
   - Khi người dùng bấm vào, gọi `window.AndroidBridge.openSettings()`.
   - Native `MainActivity` hiển thị một `BottomSheetDialog` (`dialog_settings.xml`) với các Switch Material để bật/tắt tính năng và nút xóa bộ nhớ đệm (Clear Cache).

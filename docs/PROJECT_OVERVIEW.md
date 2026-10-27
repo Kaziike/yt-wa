@@ -1,8 +1,8 @@
-# Tổng Quan Dự Án (Project Overview)
+﻿# Tổng Quan Dự Án (Project Overview)
 
 ## 1. Giới Thiệu Dự Án
 
-**YouTube Lite** là ứng dụng Android chuyên dụng mang lại trải nghiệm xem YouTube siêu nhẹ, mượt mà và hoàn toàn không bị làm phiền bởi quảng cáo. Thay vì dựa vào ứng dụng chính thức cồng kềnh (thường tiêu tốn 400MB - 1GB RAM) hoặc các bản mod phức tạp, YouTube Lite sử dụng công nghệ Android WebView phần cứng kết hợp với **Kiến trúc Brave Shields 3 tầng** và kiến trúc **Native In-App MiniPlayer 2 tầng** để tái lập trải nghiệm duyệt web an toàn, tiết kiệm tài nguyên và bảo vệ quyền riêng tư.
+**LiteTube** là ứng dụng Android chuyên dụng mang lại trải nghiệm xem YouTube siêu nhẹ, mượt mà và hoàn toàn không bị làm phiền bởi quảng cáo. Thay vì dựa vào ứng dụng chính thức cồng kềnh (thường tiêu tốn 400MB - 1GB RAM) hoặc các bản mod phức tạp, LiteTube sử dụng công nghệ Android WebView phần cứng kết hợp với **Kiến trúc Brave Shields 3 tầng** và kiến trúc **Native In-App MiniPlayer 2 tầng** để tái lập trải nghiệm duyệt web an toàn, tiết kiệm tài nguyên và bảo vệ quyền riêng tư.
 
 ### Mục Tiêu Cốt Lõi
 1. **Siêu nhẹ (Ultra Lightweight):** Mức chiếm dụng RAM chỉ duy trì khoảng ~100MB - 140MB trong suốt phiên xem.
@@ -56,7 +56,7 @@ Dự án được tinh gọn tối đa, chỉ phụ thuộc vào các thư việ
 Dự án được cấu hình sẵn pipeline `.github/workflows/build-apk.yml`. Khi có thao tác đẩy code (`push`) hoặc tạo pull request lên nhánh `main` / `master`, hệ thống Ubuntu runner sẽ:
 1. Thiết lập Java 17 Temurin.
 2. Tự động cấp quyền và chạy `./gradlew assembleDebug --stacktrace`.
-3. Đẩy file APK kết quả vào mục **Artifacts** (`YouTubeLite-Debug-APK`) với thời gian lưu trữ 14 ngày.
+3. Đẩy file APK kết quả vào mục **Artifacts** (`LiteTube-Debug-APK`) với thời gian lưu trữ 14 ngày.
 
 ### Cách 2: Biên dịch qua dòng lệnh (Local CLI)
 Yêu cầu máy tính đã cài đặt JDK 17 và cấu hình biến môi trường `ANDROID_HOME`:

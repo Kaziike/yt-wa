@@ -1,9 +1,9 @@
-# Cấu Trúc Thư Mục & Phân Tích File (File Structure)
+﻿# Cấu Trúc Thư Mục & Phân Tích File (File Structure)
 
 ## 1. Sơ Đồ Cây Thư Mục Toàn Dự Án
 
 ```
-YouTubeLite/
+LiteTube/
 ├── .github/
 │   └── workflows/
 │       └── build-apk.yml                  # CI/CD workflow build APK tự động qua GitHub Actions
@@ -25,7 +25,7 @@ YouTubeLite/
 │           │   └── scriptlets/
 │           │       ├── pip_controller.js     # Scriptlet cô lập video, điều khiển PiP & Micro-Seek
 │           │       └── youtube_defuser.js    # Scriptlet bẻ khóa InnerTube API, SSAI 16x, chống dừng nền
-│           ├── java/com/brave/youtubelite/
+│           ├── java/com/brave/LiteTube/
 │           │   ├── MainActivity.kt           # Activity điều phối 2 tầng View, MiniPlayer, PiP và IPC
 │           │   ├── network/
 │           │   │   ├── AdBlockEngine.kt      # Singleton kiểm tra và chặn URL quảng cáo tầng mạng O(1)
@@ -66,7 +66,7 @@ YouTubeLite/
 
 ## 2. Phân Tích Vai Trò Từng File Mã Nguồn
 
-### A. Tầng Native Kotlin (`app/src/main/java/com/brave/youtubelite/`)
+### A. Tầng Native Kotlin (`app/src/main/java/com/brave/LiteTube/`)
 
 | Đường dẫn file | Vai trò & Trách nhiệm chính |
 | :--- | :--- |
