@@ -184,13 +184,30 @@
     }
 
     function enter() {
-        window.__bravePipTransitionUntil = Date.now() + 1000;
+        active = true;
         forcedByNative = true;
-        var v = mainVideo();
-        if (v && !v.paused && !v.ended) {
-            window.__braveProtectPlayUntil = Date.now() + 1500;
-        }
+        window.__braveEnteringPip = true;
+        window.__bravePipTransitionUntil = Date.now() + 3000;
+        window.__braveProtectPlayUntil = Date.now() + 3500;
         startLoop();
+
+        // Nếu người dùng không chủ động pause trước đó, đảm bảo video tiếp tục phát trơn tru khi vào PiP
+        if (!window.__braveUserPaused) {
+            var v = mainVideo();
+            if (v) {
+                triggerNativePlay(v);
+                [80, 200, 500, 900].forEach(function(delay) {
+                    setTimeout(function() {
+                        if (!window.__braveUserPaused) {
+                            var target = mainVideo() || v;
+                            if (target && target.paused) {
+                                triggerNativePlay(target);
+                            }
+                        }
+                    }, delay);
+                });
+            }
+        }
         return currentVideo ? 'pip:on' : 'pip:on(no-video)';
     }
 
@@ -229,11 +246,32 @@
         clearMarks();
         removeStyle();
 
-        // Reset sạch các biến cờ bảo vệ để khi mở full ứng dụng nút Play/Pause trên giao diện web hoạt động 100% tự nhiên
-        window.__braveProtectPlayUntil = 0;
+        window.__braveEnteringPip = false;
         window.__bravePlayPendingUntil = 0;
-        window.__bravePipTransitionUntil = 0;
-        window.__braveUserPaused = false;
+        window.__bravePipTransitionUntil = Date.now() + 2500;
+
+        var v = mainVideo();
+        // Nếu người dùng KHÔNG chủ động bấm pause trong PiP -> DUY TRÌ PHÁT KHI PHÓNG TO!
+        if (!window.__braveUserPaused) {
+            // Bảo vệ phát trong 2.5 giây đầu: Chặn mọi lệnh auto-pause của YouTube khi resize/animate bung cửa sổ
+            window.__braveProtectPlayUntil = Date.now() + 2500;
+            if (v) {
+                triggerNativePlay(v);
+                [80, 200, 450, 800].forEach(function(delay) {
+                    setTimeout(function() {
+                        if (!window.__braveUserPaused) {
+                            var target = mainVideo() || v;
+                            if (target && target.paused) {
+                                triggerNativePlay(target);
+                            }
+                        }
+                    }, delay);
+                });
+            }
+        } else {
+            window.__braveProtectPlayUntil = 0;
+        }
+
         window.__isUserExplicitPause = false;
         window.__braveAllowPauseUntil = 0;
 

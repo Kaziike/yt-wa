@@ -67,7 +67,6 @@ class MainActivity : AppCompatActivity() {
     private var isFullscreen = false
 
     private var isVideoPlaying = false
-    private var isMiniPlayerActive = false
     private var currentTitle = "YouTube Lite"
     private var currentChannel = ""
     private var positionMs: Long = 0L
@@ -201,11 +200,6 @@ class MainActivity : AppCompatActivity() {
 
         webView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
         val appWebViewClient = AppWebViewClient(applicationContext)
-        appWebViewClient.onOpenSettings = {
-            runOnUiThread {
-                showSettingsDialog()
-            }
-        }
         appWebViewClient.onPageFinishedCallback = {
             runOnUiThread {
                 swipeRefreshLayout.isRefreshing = false
@@ -292,38 +286,7 @@ class MainActivity : AppCompatActivity() {
             override fun handleOnBackPressed() {
                 if (isFullscreen) {
                     exitFullscreen()
-                    return
-                }
-
-                val currentUrl = webView.url ?: ""
-                val isWatchPage = currentUrl.contains("/watch")
-
-                // 1. Nếu video đang phát hoặc đang ở URL /watch và chưa minimize:
-                // gọi window.__braveMiniPlayer.minimize() để thu nhỏ về MiniPlayer trước khi thoát trang/app!
-                if (!isMiniPlayerActive && (isVideoPlaying || isWatchPage)) {
-                    webView.evaluateJavascript(
-                        "(function(){ if (window.__braveMiniPlayer && typeof window.__braveMiniPlayer.minimize === 'function') { return window.__braveMiniPlayer.minimize(); } return 'none'; })();"
-                    ) { result ->
-                        Log.d(TAG, "Back pressed -> minimize result: $result")
-                    }
-                    return
-                }
-
-                // 2. Nếu MiniPlayer đang mở và người dùng ấn Back: cho phép back trang lịch sử web hoặc đóng MiniPlayer.
-                if (isMiniPlayerActive) {
-                    if (webView.canGoBack()) {
-                        webView.goBack()
-                    } else {
-                        webView.evaluateJavascript(
-                            "(function(){ if (window.__braveMiniPlayer && typeof window.__braveMiniPlayer.close === 'function') { window.__braveMiniPlayer.close(); } })();",
-                            null
-                        )
-                    }
-                    return
-                }
-
-                // 3. Xử lý mặc định
-                if (webView.canGoBack()) {
+                } else if (webView.canGoBack()) {
                     webView.goBack()
                 } else {
                     isEnabled = false
@@ -499,6 +462,10 @@ class MainActivity : AppCompatActivity() {
     private fun enterPipLayout() {
         progressBar.visibility = View.GONE
         swipeRefreshLayout.isEnabled = false
+        webView.evaluateJavascript(
+            "window.__braveEnteringPip = true; window.__braveProtectPlayUntil = Date.now() + 3500;",
+            null
+        )
         runPipCommand("enter")
     }
 
@@ -685,14 +652,6 @@ class MainActivity : AppCompatActivity() {
                 if (durMs > 0) durationMs = durMs
                 updatePipParams()
                 updateMediaService()
-            }
-        }
-
-        @JavascriptInterface
-        fun onMiniPlayerStateChanged(isMinimized: Boolean) {
-            runOnUiThread {
-                isMiniPlayerActive = isMinimized
-                Log.d(TAG, "onMiniPlayerStateChanged: isMinimized=$isMinimized")
             }
         }
 

@@ -2,8 +2,6 @@ package com.brave.youtubelite.network
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.os.Handler
-import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import android.webkit.WebResourceRequest
@@ -16,129 +14,115 @@ import com.brave.youtubelite.settings.AppSettings
 import java.io.ByteArrayInputStream
 
 /**
- * WebViewClient tích hợp cơ chế:
+ * WebViewClient tích hợp:
  * 1. Chặn request mạng bằng AdBlockEngine
- * 2. Tiêm Scriptlet SSAI Defuser & PiP Controller (ngay từ document-start + dự phòng khi tải trang)
- * 3. Tiêm bộ luật CSS Cosmetic Filtering bằng textContent (tương thích Trusted Types CSP của YouTube)
- * 4. Tiêm nút/mục "Cài đặt YouTube Lite" và chặn điều hướng select_site để mở Settings Dialog native
+ * 2. Tiêm Scriptlet SSAI Defuser & PiP Controller
+ * 3. Tiêm bộ luật CSS Cosmetic Filtering bằng textContent (Trusted Types CSP)
+ * 4. Nhét mục "Cài đặt YouTube Lite" vào trong trang select_site (giữ nguyên trang gốc, không ghi đè)
  */
 class AppWebViewClient(private val context: Context) : WebViewClient() {
 
     private val tag = "AppWebViewClient"
-    var onOpenSettings: (() -> Unit)? = null
     var onPageFinishedCallback: ((url: String?) -> Unit)? = null
 
     private var pipControllerCode: String = ""
-    private var miniPlayerControllerCode: String = ""
     private var scriptletCode: String = ""
     private var injectCssJs: String = ""
 
-    private val settingsScriptletJs: String = """
+    private val selectSiteSettingsScriptletJs: String = """
         (function() {
-            function triggerSettings(e) {
-                if (e) {
-                    try {
+            function injectSelectSiteItem() {
+                try {
+                    if (window.location.href.indexOf('select_site') === -1) return;
+                    if (document.getElementById('ytlite-select-site-item')) return;
+
+                    var container = document.querySelector('ytm-settings-options, ytm-item-section-renderer, #contents, .item-section-renderer-contents, div[role="navigation"]');
+                    if (!container) {
+                        var firstRow = document.querySelector('ytm-compact-link-renderer, ytm-settings-compact-link-renderer, [role="button"], div.menu-item');
+                        if (firstRow && firstRow.parentNode) {
+                            container = firstRow.parentNode;
+                        }
+                    }
+                    if (!container) return;
+
+                    var row = document.createElement('div');
+                    row.id = 'ytlite-select-site-item';
+                    row.setAttribute('role', 'button');
+                    row.setAttribute('tabindex', '0');
+                    row.style.cssText = 'display:flex;align-items:center;padding:14px 16px;cursor:pointer;background:transparent;border-bottom:1px solid rgba(255,255,255,0.08);-webkit-tap-highlight-color:rgba(255,255,255,0.1);user-select:none;box-sizing:border-box;';
+
+                    var svgNs = 'http://www.w3.org/2000/svg';
+                    var svgIcon = document.createElementNS(svgNs, 'svg');
+                    svgIcon.setAttribute('viewBox', '0 0 24 24');
+                    svgIcon.setAttribute('width', '24');
+                    svgIcon.setAttribute('height', '24');
+                    svgIcon.style.cssText = 'fill:#fff;margin-right:16px;flex-shrink:0;';
+                    var path = document.createElementNS(svgNs, 'path');
+                    path.setAttribute('d', 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z');
+                    svgIcon.appendChild(path);
+
+                    var content = document.createElement('div');
+                    content.style.cssText = 'flex:1;min-width:0;';
+
+                    var title = document.createElement('div');
+                    title.style.cssText = 'font-size:15px;color:#fff;font-weight:500;line-height:20px;';
+                    title.textContent = 'Cài đặt YouTube Lite';
+
+                    var subtitle = document.createElement('div');
+                    subtitle.style.cssText = 'font-size:12px;color:#aaa;line-height:16px;margin-top:2px;';
+                    subtitle.textContent = 'Chặn quảng cáo, phát nền, popup, cache...';
+
+                    content.appendChild(title);
+                    content.appendChild(subtitle);
+
+                    var chevron = document.createElementNS(svgNs, 'svg');
+                    chevron.setAttribute('viewBox', '0 0 24 24');
+                    chevron.setAttribute('width', '20');
+                    chevron.setAttribute('height', '20');
+                    chevron.style.cssText = 'fill:#aaa;flex-shrink:0;';
+                    var chevronPath = document.createElementNS(svgNs, 'path');
+                    chevronPath.setAttribute('d', 'M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z');
+                    chevron.appendChild(chevronPath);
+
+                    row.appendChild(svgIcon);
+                    row.appendChild(content);
+                    row.appendChild(chevron);
+
+                    row.onclick = function(e) {
                         e.preventDefault();
                         e.stopPropagation();
-                    } catch(err) {}
-                }
-                if (window.AndroidBridge && typeof window.AndroidBridge.openSettings === 'function') {
-                    window.AndroidBridge.openSettings();
-                } else {
-                    window.location.href = 'https://m.youtube.com/select_site';
-                }
+                        if (window.AndroidBridge && typeof window.AndroidBridge.openSettings === 'function') {
+                            window.AndroidBridge.openSettings();
+                        }
+                    };
+
+                    if (container.firstChild) {
+                        container.insertBefore(row, container.firstChild);
+                    } else {
+                        container.appendChild(row);
+                    }
+                } catch(e) {}
             }
 
-            function injectSettingsElements() {
-                try {
-                    // 1. Chèn mục Cài đặt vào các menu popup / account menu của YouTube
-                    var menuSelectors = [
-                        'ytm-menu-popup-renderer',
-                        'ytm-settings-menu',
-                        'ytm-account-menu',
-                        'ytm-multi-page-menu-renderer',
-                        'dialog[role="dialog"]',
-                        'div[role="menu"]',
-                        '.dialog-content',
-                        '.menu-content'
-                    ];
-                    var menus = document.querySelectorAll(menuSelectors.join(','));
-                    for (var i = 0; i < menus.length; i++) {
-                        var m = menus[i];
-                        if (m.querySelector('#ytlite-settings-item')) continue;
-
-                        var item = document.createElement('div');
-                        item.id = 'ytlite-settings-item';
-                        item.setAttribute('role', 'menuitem');
-                        item.setAttribute('tabindex', '0');
-                        item.style.cssText = 'display:flex;align-items:center;padding:12px 16px;cursor:pointer;font-size:14px;color:var(--yt-spec-text-primary,#fff);background:transparent;border-bottom:1px solid rgba(255,255,255,0.08);font-weight:500;-webkit-tap-highlight-color:rgba(255,255,255,0.1);user-select:none;';
-
-                        var icon = document.createElement('span');
-                        icon.style.cssText = 'font-size:18px;margin-right:16px;display:inline-flex;align-items:center;';
-                        icon.textContent = '⚙️';
-
-                        var label = document.createElement('span');
-                        label.style.cssText = 'flex:1;';
-                        label.textContent = 'Cài đặt YouTube Lite';
-
-                        item.appendChild(icon);
-                        item.appendChild(label);
-                        item.onclick = triggerSettings;
-
-                        if (m.firstChild) {
-                            m.insertBefore(item, m.firstChild);
-                        } else {
-                            m.appendChild(item);
-                        }
-                    }
-
-                    // 2. Chèn icon cài đặt lên thanh điều hướng trên cùng (header)
-                    var header = document.querySelector('header, ytm-header-bar, #header-bar, .mobile-topbar-header');
-                    if (header && !document.getElementById('ytlite-header-settings-btn')) {
-                        var target = header.querySelector('.header-end, .end, .topbar-icons') || header;
-                        var btn = document.createElement('button');
-                        btn.id = 'ytlite-header-settings-btn';
-                        btn.setAttribute('type', 'button');
-                        btn.setAttribute('aria-label', 'Cài đặt YouTube Lite');
-                        btn.style.cssText = 'background:transparent;border:none;cursor:pointer;padding:8px;font-size:18px;display:inline-flex;align-items:center;justify-content:center;color:var(--yt-spec-text-primary,#fff);outline:none;vertical-align:middle;';
-                        btn.textContent = '⚙️';
-                        btn.onclick = triggerSettings;
-                        target.appendChild(btn);
-                    }
-                } catch (e) {}
-            }
-
-            if (!window.__ytLiteSettingsInitialized) {
-                window.__ytLiteSettingsInitialized = true;
-
-                // Lắng nghe click nếu bất kỳ liên kết nào trỏ đến select_site
-                document.addEventListener('click', function(e) {
-                    try {
-                        var target = e.target && e.target.closest ? e.target.closest('a') : null;
-                        if (target && target.href && target.href.indexOf('select_site') !== -1) {
-                            triggerSettings(e);
-                        }
-                    } catch (err) {}
-                }, true);
-
+            if (!window.__ytLiteSelectSiteInjected) {
+                window.__ytLiteSelectSiteInjected = true;
                 if (window.MutationObserver) {
                     var observer = new MutationObserver(function() {
-                        injectSettingsElements();
+                        injectSelectSiteItem();
                     });
-                    var startObserve = function() {
+                    var startObs = function() {
                         if (document.body) {
                             observer.observe(document.body, { childList: true, subtree: true });
                         }
                     };
                     if (document.readyState === 'loading') {
-                        document.addEventListener('DOMContentLoaded', startObserve);
+                        document.addEventListener('DOMContentLoaded', startObs);
                     } else {
-                        startObserve();
+                        startObs();
                     }
                 }
             }
-
-            injectSettingsElements();
+            injectSelectSiteItem();
         })();
     """.trimIndent()
 
@@ -150,9 +134,6 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
     private fun loadAssets() {
         try {
             pipControllerCode = context.assets.open("scriptlets/pip_controller.js")
-                .bufferedReader().use { it.readText() }
-
-            miniPlayerControllerCode = context.assets.open("scriptlets/miniplayer_controller.js")
                 .bufferedReader().use { it.readText() }
 
             scriptletCode = context.assets.open("scriptlets/youtube_defuser.js")
@@ -193,8 +174,6 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
 
     /**
      * Đăng ký scriptlet chạy ở thời điểm document-start (trước mọi script của YouTube).
-     * Nhờ vậy việc hook `ytInitialPlayerResponse`, `pause()`, và `__bravePip` luôn sẵn sàng
-     * ngay từ đầu, không phụ thuộc thời điểm onPageStarted/onPageFinished.
      */
     fun installDocumentStartScripts(webView: WebView) {
         try {
@@ -209,47 +188,19 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
                 if (pipControllerCode.isNotEmpty()) {
                     WebViewCompat.addDocumentStartJavaScript(webView, pipControllerCode, origins)
                 }
-                if (miniPlayerControllerCode.isNotEmpty()) {
-                    WebViewCompat.addDocumentStartJavaScript(webView, miniPlayerControllerCode, origins)
-                }
                 if (scriptletCode.isNotEmpty()) {
                     WebViewCompat.addDocumentStartJavaScript(webView, scriptletCode, origins)
                 }
                 if (injectCssJs.isNotEmpty()) {
                     WebViewCompat.addDocumentStartJavaScript(webView, injectCssJs, origins)
                 }
-                if (settingsScriptletJs.isNotEmpty()) {
-                    WebViewCompat.addDocumentStartJavaScript(webView, settingsScriptletJs, origins)
+                if (selectSiteSettingsScriptletJs.isNotEmpty()) {
+                    WebViewCompat.addDocumentStartJavaScript(webView, selectSiteSettingsScriptletJs, origins)
                 }
             }
         } catch (e: Exception) {
             Log.e(tag, "Không thể đăng ký document-start script: ${e.message}")
         }
-    }
-
-    override fun shouldOverrideUrlLoading(
-        view: WebView?,
-        request: WebResourceRequest?
-    ): Boolean {
-        val url = request?.url?.toString() ?: ""
-        if (url.contains("select_site")) {
-            Handler(Looper.getMainLooper()).post {
-                onOpenSettings?.invoke()
-            }
-            return true
-        }
-        return super.shouldOverrideUrlLoading(view, request)
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-        if (url != null && url.contains("select_site")) {
-            Handler(Looper.getMainLooper()).post {
-                onOpenSettings?.invoke()
-            }
-            return true
-        }
-        return super.shouldOverrideUrlLoading(view, url)
     }
 
     override fun shouldInterceptRequest(
@@ -300,14 +251,11 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
         if (pipControllerCode.isNotEmpty()) {
             webView.evaluateJavascript(pipControllerCode, null)
         }
-        if (miniPlayerControllerCode.isNotEmpty()) {
-            webView.evaluateJavascript(miniPlayerControllerCode, null)
-        }
         if (scriptletCode.isNotEmpty()) {
             webView.evaluateJavascript(scriptletCode, null)
         }
-        if (settingsScriptletJs.isNotEmpty()) {
-            webView.evaluateJavascript(settingsScriptletJs, null)
+        if (selectSiteSettingsScriptletJs.isNotEmpty()) {
+            webView.evaluateJavascript(selectSiteSettingsScriptletJs, null)
         }
         // Đồng bộ cấu hình từ AppSettings xuống tầng JS
         val settingsJson = AppSettings.toJson(context)

@@ -142,22 +142,18 @@
     // ==============================================================
     // 3. DUY TRÌ ÂM THANH KHI TẮT MÀN HÌNH & CHỐNG TỰ DỪNG KHI THU NHỎ (PLAYER_VIEW_TOO_SMALL)
     // ==============================================================
-    function isPipOrMiniActive() {
-        const isPip = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
-        const isMini = !!(window.__braveMiniPlayer && typeof window.__braveMiniPlayer.isMinimized === 'function' && window.__braveMiniPlayer.isMinimized());
-        return isPip || isMini;
+    function isPipActive() {
+        return !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive()) || !!window.__braveEnteringPip;
     }
 
     ['visibilitychange', 'webkitvisibilitychange', 'pagehide'].forEach(eventType => {
         window.addEventListener(eventType, function(e) {
-            const isPipOrMini = isPipOrMiniActive();
-            if (isBgPlayEnabled() || isPipOrMini) {
+            if (isBgPlayEnabled() || isPipActive()) {
                 e.stopImmediatePropagation();
             }
         }, true);
         document.addEventListener(eventType, function(e) {
-            const isPipOrMini = isPipOrMiniActive();
-            if (isBgPlayEnabled() || isPipOrMini) {
+            if (isBgPlayEnabled() || isPipActive()) {
                 e.stopImmediatePropagation();
             }
         }, true);
@@ -166,16 +162,14 @@
     try {
         Object.defineProperty(document, 'hidden', {
             get: function() {
-                const isPipOrMini = isPipOrMiniActive();
-                if (isBgPlayEnabled() || isPipOrMini) return false;
+                if (isBgPlayEnabled() || isPipActive()) return false;
                 return !!window.__braveAppInBackground;
             },
             configurable: true
         });
         Object.defineProperty(document, 'visibilityState', {
             get: function() {
-                const isPipOrMini = isPipOrMiniActive();
-                if (isBgPlayEnabled() || isPipOrMini) return 'visible';
+                if (isBgPlayEnabled() || isPipActive()) return 'visible';
                 return window.__braveAppInBackground ? 'hidden' : 'visible';
             },
             configurable: true
@@ -381,30 +375,26 @@
             return nativeMediaPause.apply(this, arguments);
         }
 
-        const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
-        const isMiniPlayer = !!(window.__braveMiniPlayer && typeof window.__braveMiniPlayer.isMinimized === 'function' && window.__braveMiniPlayer.isMinimized());
+        // 2. Nếu đang trong thời gian bảo vệ phát (khi vừa vào PiP, vừa từ PiP phóng to lên, hoặc vừa bấm Play):
+        // Chặn tuyệt đối mọi lệnh auto-pause ngầm của YouTube!
+        if (window.__braveProtectPlayUntil && Date.now() < window.__braveProtectPlayUntil) {
+            console.log('[BraveShield] Đã chặn lệnh auto-pause trong thời gian bảo vệ phát (PiP/Transition/Play)!');
+            return;
+        }
+
+        const isPipMode = isPipActive();
         const isBackground = !!window.__braveAppInBackground;
         const bgPlayEnabled = isBgPlayEnabled();
 
-        // 2. KHI ĐANG MỞ FULL ỨNG DỤNG BÌNH THƯỜNG TRÊN MÀN HÌNH (!isPipMode && !isBackground && !isMiniPlayer):
-        // Mọi lệnh pause phải được thông qua nativeMediaPause 100% tự nhiên, KHÔNG bị chặn bởi bất kỳ cờ thời gian nào!
-        if (!isPipMode && !isBackground && !isMiniPlayer) {
-            if (window.__braveProtectPlayUntil && Date.now() < window.__braveProtectPlayUntil) {
-                console.log('[BraveShield] Đã chặn lệnh auto-pause trong thời gian bảo vệ Play!');
-                return;
-            }
+        // 3. KHI ĐANG MỞ FULL ỨNG DỤNG BÌNH THƯỜNG TRÊN MÀN HÌNH (!isPipMode && !isBackground):
+        // Mọi lệnh pause từ player web được thông qua nativeMediaPause tự nhiên
+        if (!isPipMode && !isBackground) {
             return nativeMediaPause.apply(this, arguments);
         }
 
-        // 3. Nếu đang ở dưới nền nhưng người dùng đã tắt tính năng phát trong nền (và không ở chế độ PiP)
+        // 4. Nếu đang ở dưới nền nhưng người dùng đã tắt tính năng phát trong nền (và không ở chế độ PiP)
         if (isBackground && !isPipMode && !bgPlayEnabled) {
             return nativeMediaPause.apply(this, arguments);
-        }
-
-        // 4. Nếu vừa bấm Play từ PiP / Notification -> CHẶN TUYỆT ĐỐI mọi lệnh auto-pause của YouTube khi ở PiP hoặc chạy nền
-        if (window.__braveProtectPlayUntil && Date.now() < window.__braveProtectPlayUntil) {
-            console.log('[BraveShield] Đã chặn lệnh auto-pause trong thời gian bảo vệ Play (PiP/Background)!');
-            return;
         }
 
         // 5. Bỏ qua tất cả các lệnh pause do YouTube tự gọi khi thu nhỏ PiP hoặc tắt màn hình!
