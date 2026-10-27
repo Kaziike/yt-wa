@@ -232,20 +232,20 @@ class MainActivity : AppCompatActivity() {
         configureWebSettings(webView)
 
         webView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
-        val browseClient = object : AppWebViewClient(applicationContext) {
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val url = request?.url?.toString() ?: ""
+        val browseClient = AppWebViewClient(applicationContext).apply {
+            onInterceptWatchUrl = { url ->
                 // Nếu bấm vào video thông thường (/watch?v=... trừ Shorts): Mở lớp phát đè lên!
                 if (url.contains("/watch") && !url.contains("/shorts/")) {
                     openVideoPlayer(url)
-                    return true // Giữ nguyên trang chủ bên dưới!
+                    true // Giữ nguyên trang chủ bên dưới!
+                } else {
+                    false
                 }
-                return super.shouldOverrideUrlLoading(view, request)
             }
-        }
-        browseClient.onPageFinishedCallback = {
-            runOnUiThread {
-                swipeRefreshLayout.isRefreshing = false
+            onPageFinishedCallback = {
+                runOnUiThread {
+                    swipeRefreshLayout.isRefreshing = false
+                }
             }
         }
         browseClient.installDocumentStartScripts(webView)

@@ -20,10 +20,11 @@ import java.io.ByteArrayInputStream
  * 3. Tiêm bộ luật CSS Cosmetic Filtering bằng textContent (Trusted Types CSP)
  * 4. Nhét mục "Cài đặt YouTube Lite" vào trong trang select_site (giữ nguyên trang gốc, không ghi đè)
  */
-class AppWebViewClient(private val context: Context) : WebViewClient() {
+open class AppWebViewClient(private val context: Context) : WebViewClient() {
 
     private val tag = "AppWebViewClient"
     var onPageFinishedCallback: ((url: String?) -> Unit)? = null
+    var onInterceptWatchUrl: ((url: String) -> Boolean)? = null
 
     private var pipControllerCode: String = ""
     private var scriptletCode: String = ""
@@ -201,6 +202,25 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
         } catch (e: Exception) {
             Log.e(tag, "Không thể đăng ký document-start script: ${e.message}")
         }
+    }
+
+    override fun shouldOverrideUrlLoading(
+        view: WebView?,
+        request: WebResourceRequest?
+    ): Boolean {
+        val url = request?.url?.toString() ?: ""
+        if (onInterceptWatchUrl?.invoke(url) == true) {
+            return true
+        }
+        return super.shouldOverrideUrlLoading(view, request)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+        if (url != null && onInterceptWatchUrl?.invoke(url) == true) {
+            return true
+        }
+        return super.shouldOverrideUrlLoading(view, url)
     }
 
     override fun shouldInterceptRequest(
