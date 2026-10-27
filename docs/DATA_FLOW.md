@@ -1,139 +1,132 @@
-# Luồng Dữ Liệu & Trình Tự Hoạt Động (Data Flow)
+# Luồng Dữ Liệu & Quy Trình Tương Tác (Data Flow)
 
-Tài liệu này mô tả chi tiết các luồng sự kiện, luồng dữ liệu mạng, vòng đời tương tác giữa người dùng, hệ điều hành Android, mã nguồn Kotlin Native và các Scriptlet Web.
+Tài liệu này mô tả chi tiết các chuỗi sự kiện, luồng xử lý dữ liệu và giao thức IPC (Inter-Process Communication) giữa người dùng, hệ điều hành Android, Native Kotlin và Web Engine của ứng dụng **YouTube Lite**.
 
 ---
 
-## 1. Luồng Khởi Động Ứng Dụng (Application Startup Flow)
+## 1. Luồng 1: Bấm Xem Video & Kích Hoạt In-App MiniPlayer 2 Tầng
+
+Quy trình người dùng bấm vào một video trên trang chủ và hệ thống mở lớp phát nổi đè lên mà không làm mất trang chủ bên dưới:
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as Người dùng
+    actor User as Người Dùng
+    participant BrowseWeb as webView (Browse)
+    participant Interceptor as browseWatchInterceptorJs
+    participant NativeBridge as AndroidBridge (IPC)
     participant Main as MainActivity
-    participant Engine as AdBlockEngine
-    participant Client as AppWebViewClient
-    participant View as KeepAliveWebView
-    participant Svc as MediaService
+    participant PlayerPanel as playerPanel (Layer 2)
+    participant PlayerWeb as playerWebView (Player)
 
-    User->>Main: Mở ứng dụng (onCreate)
-    Main->>Main: Đăng ký pipActionReceiver (RECEIVER_EXPORTED)
-    Main->>Main: Yêu cầu quyền POST_NOTIFICATIONS (Android 13+)
-    Main->>Engine: AdBlockEngine.init(context)
-    Engine->>Engine: Đọc blocked_domains.txt vào HashSet
-    Main->>Main: Nạp trước pip_controller.js vào bộ nhớ
-    Main->>View: Cấu hình WebSettings (JS on, offscreenPreRaster off)
-    Main->>View: webView.addJavascriptInterface(MediaBridge, "AndroidBridge")
-    Main->>Client: Khởi tạo AppWebViewClient(context)
-    Client->>Client: Nạp pip_controller.js, youtube_defuser.js, cosmetic_rules.css
-    Client->>View: installDocumentStartScripts() (DOCUMENT_START)
-    Main->>View: webView.loadUrl("https://m.youtube.com")
-```
-
----
-
-## 2. Luồng Chặn Mạng Tầng Native (Network Interception Flow)
-
-Mỗi khi trình duyệt nội bộ gửi yêu cầu tải bất kỳ tài nguyên nào (HTML, script, ảnh, video chunk, telemetry), yêu cầu đó đều đi qua bộ lọc `shouldInterceptRequest`:
-
-```mermaid
-flowchart TD
-    Req["Request WebResourceRequest(URL)"] --> Client["AppWebViewClient.shouldInterceptRequest()"]
-    Client --> Parse["Uri.parse(url)<br>Trích xuất host và path"]
-    Parse --> CheckDomain{"host có trong HashSet<br>hoặc trùng subdomain?"}
+    User->>BrowseWeb: Chạm vào thumbnail video (/watch?v=...)
+    BrowseWeb->>Interceptor: Bắt sự kiện click tại Capture Phase
+    Note over Interceptor: Kiểm tra URL chứa /watch & không chứa /shorts/
+    Interceptor->>BrowseWeb: e.preventDefault() & stopImmediatePropagation()
+    Note over BrowseWeb: Giữ nguyên vị trí cuộn & feed trang chủ 100%!
+    Interceptor->>NativeBridge: window.AndroidBridge.openWatchLayer(fullUrl)
+    NativeBridge->>Main: runOnUiThread { openVideoPlayer(url) }
     
-    CheckDomain -->|Có| Block["Ghi log 🛡️ [Blocked]<br>Trả về WebResourceResponse rỗng<br>(text/plain, 0 byte)"]
-    CheckDomain -->|Không| CheckPath{"path có chứa pattern<br>/api/stats/ads<br>/pagead/<br>/youtubei/v1/log_event?"}
-    
-    CheckPath -->|Có| Block
-    CheckPath -->|Không| Allow["Gọi super.shouldInterceptRequest()<br>Tiếp tục tải tài nguyên bình thường"]
+    Main->>PlayerPanel: Đặt layoutParams.height = MATCH_PARENT, gravity = TOP
+    Main->>PlayerPanel: visibility = VISIBLE, translationY = 0f
+    Main->>Main: panelState = PanelState.EXPANDED
+    Main->>PlayerWeb: loadUrl(fullUrl)
+    Note over PlayerWeb: Bắt đầu phát video trên tầng nổi!
 ```
 
 ---
 
-## 3. Luồng Đồng Bộ Trạng Thái JavaScript $\leftrightarrow$ Kotlin Native
-
-Trạng thái của video đang phát được đồng bộ liên tục để phục vụ cho cửa sổ PiP và Foreground Service:
+## 2. Luồng 2: Thu Nhỏ Video Thành MiniPlayer & Bung To Lại
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Video as HTML5 Video Element
-    participant Defuser as youtube_defuser.js
-    participant PiPJS as pip_controller.js
-    participant Bridge as AndroidBridge (JavascriptInterface)
+    actor User as Người Dùng
     participant Main as MainActivity
+    participant PlayerPanel as playerPanel
+    participant PlayerWeb as playerWebView
+    participant MiniBar as miniPlayerBar
+    participant BrowseWeb as webView (Browse)
 
-    Video->>Defuser: Sự kiện "play" hoặc "playing"
-    Defuser->>Defuser: Trích xuất Title & Channel từ DOM
-    Defuser->>Bridge: AndroidBridge.onVideoPlaying(title, channel)
-    Bridge->>Main: runOnUiThread { isVideoPlaying = true; currentTitle; currentChannel; }
-    Main->>Main: updatePipParams() (Nút đổi thành PAUSE)
+    rect rgb(30, 30, 45)
+    note right of User: Giai đoạn 1: Thu nhỏ (Collapse)
+    User->>Main: Vuốt mép video xuống hoặc bấm nút mũi tên [∨]
+    Main->>Main: panelState = PanelState.COLLAPSED
+    Main->>MiniBar: visibility = VISIBLE
+    Main->>PlayerPanel: Animate trượt xuống targetY (H - 64dp) trong 260ms
+    Main->>PlayerWeb: Animate scale thu nhỏ vào khung 104dp bên trái
+    Main->>PlayerPanel: withEndAction: height = 64dp, gravity = BOTTOM, translationY = 0f
+    Note over BrowseWeb: Toàn bộ vùng màn hình phía trên hoàn toàn tự do nhận cảm ứng!
+    end
 
-    Video->>PiPJS: Sự kiện "loadedmetadata" / "resize"
-    PiPJS->>Bridge: AndroidBridge.onVideoSize(width, height)
-    Bridge->>Main: runOnUiThread { videoAspectRatio = Rational(w, h); }
-    Main->>Main: updatePipParams() (Khung PiP khớp tỉ lệ thật)
+    rect rgb(30, 45, 30)
+    note right of User: Giai đoạn 2: Bung to lại (Expand)
+    User->>MiniBar: Chạm vào thanh MiniPlayer hoặc vuốt lên
+    Main->>Main: panelState = PanelState.EXPANDED
+    Main->>PlayerPanel: height = MATCH_PARENT, gravity = TOP, translationY = targetY
+    Main->>PlayerPanel: Animate trượt lên translationY = 0f trong 260ms
+    Main->>PlayerWeb: Animate scale to về 1.0f
+    Main->>MiniBar: visibility = GONE
+    end
 
-    Video->>Defuser: Sự kiện "pause"
-    Defuser->>Bridge: AndroidBridge.onVideoPaused()
-    Bridge->>Main: runOnUiThread { isVideoPlaying = false; }
-    Main->>Main: updatePipParams() (Nút đổi thành PLAY)
-```
-
----
-
-## 4. Luồng Chuyển Đổi Sang Picture-in-Picture (PiP Flow)
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Người dùng
-    participant Main as MainActivity
-    participant View as KeepAliveWebView
-    participant PiP as pip_controller.js
-    participant OS as Hệ điều hành Android
-
-    User->>Main: Bấm Home hoặc vuốt về màn hình chính
-    Main->>Main: onUserLeaveHint() kích hoạt
-    alt isVideoPlaying == true hoặc isFullscreen == true
-        Main->>Main: enterPipLayout()
-        Main->>PiP: runPipCommand("enter")
-        Note over PiP: Bật CSS cô lập [data-brave-pip-mode="on"]<br/>Ẩn header, bottom bar, gợi ý<br/>Phủ kín thẻ video 100vw x 100vh
-        Main->>OS: enterPictureInPictureMode(buildPipParams())
-        OS->>Main: onPictureInPictureModeChanged(true)
-        Main->>View: postDelayed(enterPipLayout, 150ms)
-        Main->>View: postDelayed(enterPipLayout, 450ms)
-        Main->>Main: updatePipParams()
-    else Video không phát
-        Main->>OS: Thoát ra màn hình chính bình thường
+    rect rgb(45, 30, 30)
+    note right of User: Giai đoạn 3: Đóng hẳn (Close)
+    User->>MiniBar: Nhấn nút đóng [✕]
+    Main->>PlayerPanel: Animate trượt hẳn xuống mép dưới màn hình (H)
+    Main->>PlayerPanel: withEndAction: visibility = GONE
+    Main->>PlayerWeb: loadUrl("about:blank")
+    Main->>Main: stopMediaService() & updatePipParams()
     end
 ```
 
 ---
 
-## 5. Luồng Duy Trì Âm Thanh Khi Khóa Màn Hình (Screen Off Lifecycle Flow)
+## 3. Luồng 3: Điều Khiển Media Từ Hệ Thống (Lockscreen, Notification, Bluetooth)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User as Người dùng
-    participant Main as MainActivity
-    participant Svc as MediaService
-    participant OS as PowerManager & Android Audio
+    actor User as Người Dùng
+    participant SystemUI as Màn hình khóa / Notification / Tai nghe
+    participant MediaSvc as MediaService (MediaSessionCompat)
+    participant Receiver as mediaActionReceiver (MainActivity)
+    participant PiPJs as pip_controller.js
+    participant Video as HTMLMediaElement (<video>)
 
-    User->>OS: Nhấn nút nguồn tắt màn hình
-    OS->>Main: onPause() $\rightarrow$ onStop()
-    alt isVideoPlaying == true
-        Main->>Svc: startForegroundService(ACTION_START, title, channel)
-        Svc->>OS: WakeLock.acquire(2 giờ)
-        Svc->>OS: startForeground(NOTIFICATION_ID, MediaNotification)
-        Note over OS: CPU giữ trạng thái hoạt động một phần (PARTIAL_WAKE_LOCK)<br/>Chromium tiếp tục giải mã AudioTrack mà không bị ngắt
+    User->>SystemUI: Nhấn nút Play / Pause / Next / Seek
+    SystemUI->>MediaSvc: MediaSessionCompat.Callback (onPlay, onPause, onSeekTo...)
+    MediaSvc->>Receiver: Gửi Broadcast (ACTION_MEDIA_PLAY / PAUSE / SEEK)
+    Receiver->>PiPJs: runPipCommand("play" / "pause" / "seekTo(pos)")
+    PiPJs->>Video: Gọi native HTMLMediaElement.prototype.play() / pause()
+    Video-->>PiPJs: Bắn sự kiện timeupdate / play / pause
+    PiPJs->>MediaSvc: Đồng bộ trạng thái mới qua AndroidBridge
+    MediaSvc->>SystemUI: Cập nhật PlaybackState & Notification thời gian thực
+```
+
+---
+
+## 4. Luồng 4: Bộ Nhớ Đệm Tài Nguyên Tĩnh (Static Preload Cache)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant WebView as Chromium Web Engine
+    participant Client as AppWebViewClient (shouldInterceptRequest)
+    participant CacheMgr as WebResourceCacheManager
+    participant Disk as Bộ nhớ cục bộ (cache/web_static/)
+    participant Network as Máy chủ YouTube CDN
+
+    WebView->>Client: shouldInterceptRequest(url)
+    Client->>CacheMgr: WebResourceCacheManager.intercept(request)
+    CacheMgr->>CacheMgr: Tính MD5(url) & kiểm tra loại file tĩnh
+    alt Đã tồn tại trong Disk Cache
+        CacheMgr->>Disk: Đọc file nhị phân từ ổ đĩa
+        Disk-->>CacheMgr: Trả về InputStream
+        CacheMgr-->>Client: WebResourceResponse(mime, "UTF-8", stream) (0ms delay)
+        Client-->>WebView: Trả dữ liệu ngay lập tức, không tốn data mạng!
+    else Chưa có trong Cache
+        CacheMgr-->>Client: Trả về null
+        Client->>Network: Tải dữ liệu từ mạng qua Chromium Engine
+        Network-->>CacheMgr: Tải hoàn tất -> Lưu vào Disk Cache cho các lần sau
     end
-
-    User->>OS: Bật sáng màn hình & mở khóa điện thoại
-    OS->>Main: onStart() $\rightarrow$ onResume()
-    Main->>Svc: stopMediaService(ACTION_STOP)
-    Svc->>OS: WakeLock.release()
-    Svc->>Svc: stopForeground(STOP_FOREGROUND_REMOVE) & stopSelf()
 ```

@@ -1,13 +1,13 @@
 # Hướng Dẫn Scriptlets & Bộ Lọc Web (Scriptlets & Filters Guide)
 
-Tài liệu này phân tích chi tiết cơ chế hoạt động của các thành phần Web Shields nằm trong thư mục `app/src/main/assets/`.
+Tài liệu này phân tích chi tiết cơ chế hoạt động của các thành phần Web Shields và Scriptlets được nạp vào Chromium Web Engine của ứng dụng **YouTube Lite**.
 
 ---
 
-## 1. `pip_controller.js` (Bộ Điều Khiển PiP Độc Lập)
+## 1. `pip_controller.js` (Bộ Điều Khiển PiP & Micro-Seek Re-render Kick)
 
 - **Vị trí file:** `app/src/main/assets/scriptlets/pip_controller.js`
-- **Mục tiêu:** Cô lập tuyệt đối thẻ video trong DOM khi chuyển sang cửa sổ PiP, loại bỏ 100% các thành phần rác (header, nút mở app, gợi ý, danh sách phát) và cung cấp API điều khiển Play/Pause không phụ thuộc vào YouTube.
+- **Mục tiêu:** Cô lập tuyệt đối thẻ video trong DOM khi chuyển sang cửa sổ PiP, loại bỏ 100% các thành phần rác (header, nút mở app, gợi ý, danh sách phát), đồng thời duy trì phát liên tục không bị kẹt nút Play/Pause khi thoát/vào PiP.
 
 ### A. Cơ chế Cô Lập DOM (DOM Isolation)
 Khi kích hoạt PiP (`enter()`), script gán các thuộc tính đặc biệt vào DOM:
@@ -50,23 +50,63 @@ html[data-brave-pip-mode] video[data-brave-pip-role="video"] {
 }
 ```
 
-### B. Lựa chọn Video Thông Minh (`mainVideo`)
-Nếu trên trang có nhiều thẻ `<video>` (ví dụ thumbnail preview hoặc shorts), thuật toán lựa chọn:
-1. Lọc danh sách video đang phát (`!paused && !ended`).
-2. Tính điểm số kích thước: `score = (videoWidth * videoHeight) || (offsetWidth * offsetHeight)`.
-3. Chọn video có điểm số cao nhất.
-
-### C. Điều khiển Play / Pause Native
-YouTube có cơ chế tự động tạm dừng khi kích thước người xem quá nhỏ (`PLAYER_VIEW_TOO_SMALL`). `pip_controller.js` giải quyết bằng cách lưu con trỏ hàm gốc của trình duyệt:
-```javascript
-window.__braveNativePlay = HTMLMediaElement.prototype.play;
-window.__braveNativePause = HTMLMediaElement.prototype.pause;
-```
-Khi người dùng bấm Play/Pause từ PiP, script gọi trực tiếp hàm native này, vượt qua hoàn toàn các hàm bẫy của YouTube.
+### B. Micro-Seek Re-render Kick & Cờ Bảo Vệ Phát
+- **`__braveProtectPlayUntil`:** Khi chuyển đổi giữa PiP và ứng dụng đầy đủ, YouTube thường kích hoạt kiểm tra kích thước nhỏ (`PLAYER_VIEW_TOO_SMALL`) làm dừng video ngầm. Cờ thời gian này vô hiệu hóa mọi lệnh auto-pause trong 2.5 - 3.5 giây sau khi chuyển đổi.
+- **`triggerMicroSeek()`:**
+  ```javascript
+  var cur = v.currentTime;
+  v.currentTime = cur; // Micro-seek không làm gián đoạn phát
+  v.dispatchEvent(new Event('seeking'));
+  v.dispatchEvent(new Event('seeked'));
+  v.dispatchEvent(new Event('timeupdate'));
+  if (player && typeof player.wakeUpControls === 'function') player.wakeUpControls();
+  if (player && typeof player.updateDimensions === 'function') player.updateDimensions();
+  ```
+  Thao tác này đánh thức ngay pipeline render và hiển thị controls của YouTube Player, triệt tiêu hoàn toàn lỗi kẹt nút Play/Pause khi phóng to lại app.
 
 ---
 
-## 2. `youtube_defuser.js` (Bẻ Khóa Quảng Cáo & Chống Tự Dừng)
+## 2. `browseWatchInterceptorJs` (Bộ Chặn SPA Watch Router)
+
+- **Vị trí tích hợp:** Khai báo trực tiếp trong `AppWebViewClient.kt` (chỉ chạy khi `isBrowseMode == true`).
+- **Mục tiêu:** Chặn router nội bộ của YouTube Mobile Web (`m.youtube.com`) tự ý điều hướng trang chủ khi người dùng chạm vào video, chuyển URL video sang Native để mở trên `playerPanel`.
+
+### Cơ chế hoạt động:
+1. **Lưới 1 - Capture Phase Click Interceptor:**
+   Lắng nghe sự kiện `click` trên `document` với `useCapture = true`:
+   ```javascript
+   var anchor = el.closest ? el.closest('a') : null;
+   if (anchor && anchor.href && isWatchUrl(anchor.href)) {
+       e.preventDefault();
+       e.stopPropagation();
+       e.stopImmediatePropagation();
+       dispatchWatchUrl(anchor.href);
+       return false;
+   }
+   ```
+2. **Lưới 2 - Hook History API:**
+   Ghi đè `history.pushState` và `history.replaceState`. Nếu URL chứa `/watch` và không chứa `/shorts/`:
+   ```javascript
+   if (url && isWatchUrl(String(url))) {
+       if (dispatchWatchUrl(String(url))) return;
+   }
+   ```
+3. **Lưới 3 - Lắng nghe sự kiện Polymer `yt-navigate`:** Bắt sự kiện chuyển trang nội bộ của web components.
+
+---
+
+## 3. `selectSiteSettingsScriptletJs` (Tích Hợp Cài Đặt Vào Trang `select_site`)
+
+- **Vị trí tích hợp:** Khai báo trong `AppWebViewClient.kt`.
+- **Mục tiêu:** Nhét mục "Cài đặt YouTube Lite" vào đầu danh sách cài đặt của YouTube tại `https://m.youtube.com/select_site` mà không làm thay đổi thanh công cụ mặc định của YouTube.
+- **Cơ chế:**
+  - Giám sát DOM bằng `MutationObserver` khi URL khớp `select_site`.
+  - Tạo phần tử HTML hàng danh sách có biểu tượng bánh răng SVG và nhãn "Cài đặt YouTube Lite".
+  - Khi người dùng chạm vào, gọi `window.AndroidBridge.openSettings()` để mở `BottomSheetDialog` Native.
+
+---
+
+## 4. `youtube_defuser.js` (Bẻ Khóa Quảng Cáo & Chống Tự Dừng)
 
 - **Vị trí file:** `app/src/main/assets/scriptlets/youtube_defuser.js`
 - **Mục tiêu:** Xử lý triệt để quảng cáo InnerTube API, tua quảng cáo ghép luồng SSAI và duy trì âm thanh khi ẩn trang.
@@ -79,7 +119,7 @@ Khi người dùng bấm Play/Pause từ PiP, script gọi trực tiếp hàm na
 4. **Proxy `window.fetch`:** Chặn các request tới `/youtubei/v1/player`, clone response và thay thế body bằng JSON đã được tẩy sạch quảng cáo.
 
 ### B. Khắc chế quảng cáo ghép luồng (SSAI - Server-Side Ad Insertion)
-Một số quảng cáo được YouTube mã hóa trực tiếp vào luồng video gốc. Bộ defuser chạy một chu kỳ giám sát 150ms:
+Vòng lặp giám sát 150ms:
 ```javascript
 const adShowingElement = document.querySelector('.ad-showing, .ad-interrupting, .video-ads, [class*="ytp-ad-player-overlay"]');
 if (adShowingElement && video) {
@@ -88,64 +128,21 @@ if (adShowingElement && video) {
     if (isFinite(video.duration) && video.duration > 0) {
         video.currentTime = video.duration; // Nhảy ngay đến cuối
     }
-    // Tự động nhấn tất cả nút Bỏ qua quảng cáo
     document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern').forEach(btn => btn.click());
 }
 ```
 
-### C. Bẻ khóa Page Visibility API & Lệnh Pause ngầm
-- Chặn sự kiện: Ngăn các sự kiện `visibilitychange`, `webkitvisibilitychange`, `pagehide` tiếp cận mã JavaScript của YouTube bằng `e.stopImmediatePropagation()`.
-- Giả lập trạng thái hiển thị:
-  ```javascript
-  Object.defineProperty(document, 'hidden', { get: () => false });
-  Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
-  ```
-- Kiểm soát lệnh Pause: Ghi đè `HTMLMediaElement.prototype.pause`. Nếu lệnh pause không xuất phát từ việc người dùng chủ động chạm vào nút tạm dừng (`__isUserExplicitPause`), lệnh pause sẽ bị hủy bỏ và ghi log:
-  `[BraveShield] Đã chặn lệnh tự dừng video do kích thước nhỏ hoặc chạy nền!`
-
 ---
 
-## 3. `cosmetic_rules.css` (Làm Sạch Giao Diện)
+## 5. `cosmetic_rules.css` (Làm Sạch Giao Diện)
 
 - **Vị trí file:** `app/src/main/assets/filters/cosmetic_rules.css`
 - **Mục tiêu:** Ẩn toàn bộ các thành phần quảng cáo dạng thẻ hiển thị, banner ứng dụng và tối ưu độ mượt.
-
-### Nhóm luật chính:
-1. **Banner và Thẻ tài trợ:**
-   - `.ytm-promoted-sparkles-web-renderer`
-   - `.ytm-companion-ad-renderer`
-   - `ytm-promoted-video-renderer`
-   - `div[class*="ad-display"]`, `.ytp-ad-overlay-container`
-2. **Thông báo ép tải App YouTube:**
-   - `.mealbar-promo-renderer`
-   - `.open-in-app-banner`
-   - `ytm-pivot-bar-item-renderer[aria-label*="Get app"]`
-   - `ytm-pivot-bar-item-renderer[aria-label*="Tải ứng dụng"]`
-   - `ytm-upsell-dialog-renderer`
-3. **Tối ưu hóa cuộn trang:**
-   - Tắt `backdrop-filter: none !important` trên toàn bộ phần tử để giảm tải GPU khi cuộn danh sách video.
-
-### Kỹ thuật tiêm CSS vượt rào cản Trusted Types CSP
-YouTube áp dụng chính sách Content Security Policy (CSP) nghiêm ngặt ngăn cản việc gán chuỗi trực tiếp vào `innerHTML`. `AppWebViewClient.kt` khắc phục bằng cách:
-1. Đọc nội dung CSS từ assets và mã hóa thành chuỗi Base64.
-2. Tiêm script giải mã Base64 thành byte array và gán qua `style.textContent`:
-   ```javascript
-   style.textContent = (window.TextDecoder ? new TextDecoder('utf-8').decode(bytes) : bin);
-   ```
-   Thao tác này hoàn toàn hợp lệ theo chuẩn Trusted Types và không bao giờ bị trình duyệt từ chối.
+- **Tiêm an toàn:** Mã hóa Base64 và gán qua `style.textContent` tuân thủ Content Security Policy (Trusted Types) của YouTube.
 
 ---
 
-## 4. `blocked_domains.txt` (Danh Sách Đen Domain)
+## 6. `blocked_domains.txt` (Danh Sách Đen Domain)
 
 - **Vị trí file:** `app/src/main/assets/filters/blocked_domains.txt`
-- **Cấu trúc:** Mỗi dòng là một tên miền hoặc endpoint cần chặn. Hỗ trợ chú thích bằng ký tự `#` ở đầu dòng.
-- **Danh sách tiêu biểu:**
-  - `googleads.g.doubleclick.net`
-  - `pagead2.googlesyndication.com`
-  - `securepubads.g.doubleclick.net`
-  - `www.google-analytics.com`
-  - `youtube.com/api/stats/ads`
-  - `youtube.com/api/stats/qoe`
-  - `youtube.com/youtubei/v1/log_event`
-  - `video-ad-stats.googlevideo.com`
+- **Cấu trúc:** Mỗi dòng là một tên miền hoặc endpoint cần chặn tầng mạng. Tra cứu trong thời gian $O(1)$ tại `AdBlockEngine.kt`.

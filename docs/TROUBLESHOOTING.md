@@ -36,7 +36,7 @@ Khi người dùng chuyển sang chế độ Picture-in-Picture, cửa sổ PiP 
 ### Nguyên nhân đã xác minh
 Trong `MainActivity.kt`, nếu đặt `webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)`, WebView sẽ được render vào một bộ đệm ngoài màn hình (offscreen buffer). Vì toàn bộ Activity đã có cờ `android:hardwareAccelerated="true"` trong `AndroidManifest.xml`, việc ép thêm hardware layer ở cấp View khiến bộ điều phối cửa sổ của Android không cập nhật các khung hình mới vào bộ đệm khi kích thước view bị thu nhỏ đột ngột về khung PiP.
 
-### Cách khắc phục (Đã sửa tại `MainActivity.kt` dòng 152)
+### Cách khắc phục
 Đặt layer type về chế độ mặc định:
 ```kotlin
 webView.setLayerType(View.LAYER_TYPE_NONE, null)
@@ -53,12 +53,12 @@ Cửa sổ PiP hiện ra có nút Play và Pause, nhưng khi người dùng bấ
 Bắt đầu từ Android 13 (API 33) và bắt buộc trên Android 14 (API 34), khi đăng ký `BroadcastReceiver`, nhà phát triển phải chỉ định cờ `RECEIVER_EXPORTED` hoặc `RECEIVER_NOT_EXPORTED`.
 Các nút `RemoteAction` trên khung PiP được phát lệnh từ tiến trình hệ điều hành (`com.android.systemui`). Nếu đăng ký bằng `RECEIVER_NOT_EXPORTED`, hệ thống Android sẽ chặn các broadcast này từ SystemUI để đảm bảo an ninh, khiến receiver của ứng dụng không bao giờ nhận được sự kiện.
 
-### Cách khắc phục (Đã sửa tại `MainActivity.kt` dòng 89-94)
+### Cách khắc phục
 Sử dụng cờ `ContextCompat.RECEIVER_EXPORTED`:
 ```kotlin
 ContextCompat.registerReceiver(
     this,
-    pipActionReceiver,
+    mediaActionReceiver,
     filter,
     ContextCompat.RECEIVER_EXPORTED
 )
@@ -74,9 +74,9 @@ ContextCompat.registerReceiver(
 ### Nguyên nhân đã xác minh
 Hệ điều hành Android quy định nghiêm ngặt: Tỉ lệ khung hình của `PictureInPictureParams.Builder().setAspectRatio(...)` chỉ được phép nằm trong khoảng:
 $$\frac{1}{2.39} \le \text{ratio} \le 2.39$$
-Nếu truyền một tỉ lệ vượt ra ngoài khoảng này (ví dụ `Rational(21, 9)` $\approx 2.33$ gần sát giới hạn, hoặc các video crop bất thường), hàm native của Android sẽ ném `IllegalArgumentException`.
+Nếu truyền một tỉ lệ vượt ra ngoài khoảng này, hàm native của Android sẽ ném `IllegalArgumentException`.
 
-### Cách khắc phục (Đã xử lý tại `MainActivity.kt` dòng 251-261)
+### Cách khắc phục
 Tạo hàm kẹp tỉ lệ an toàn:
 ```kotlin
 private fun clampedPipAspectRatio(): Rational {
@@ -103,7 +103,7 @@ Khi tiêm CSS ẩn quảng cáo vào `m.youtube.com`, trình duyệt báo lỗi 
 ### Nguyên nhân đã xác minh
 Trang YouTube Mobile áp dụng chính sách CSP rất ngặt nghèo, chặn hoàn toàn việc gán chuỗi trực tiếp vào `style.innerHTML` hoặc `insertAdjacentHTML`.
 
-### Cách khắc phục (Đã xử lý tại `AppWebViewClient.kt` dòng 46-65)
+### Cách khắc phục
 Mã hóa CSS sang chuỗi Base64 và gán vào `style.textContent` thông qua `TextDecoder`:
 ```javascript
 style.textContent = (window.TextDecoder ? new TextDecoder('utf-8').decode(bytes) : bin);
@@ -120,5 +120,37 @@ Khi Activity co nhỏ lại vào khung PiP, video chạy được 1 giây rồi 
 ### Nguyên nhân đã xác minh
 Bộ mã nguồn web của YouTube có logic kiểm tra kích thước của trình phát: Nếu chiều cao hoặc chiều rộng của video nhỏ hơn ngưỡng quy định, script YouTube sẽ phát lệnh `video.pause()`.
 
-### Cách khắc phục (Đã xử lý tại `youtube_defuser.js` dòng 154-170)
+### Cách khắc phục
 Ghi đè `HTMLMediaElement.prototype.pause`: Chỉ cho phép lệnh dừng video nếu người dùng bấm trực tiếp vào nút tạm dừng hoặc nút Pause trên PiP Native. Mọi lệnh `pause` do YouTube tự gọi khi khung nhìn bị thu nhỏ đều bị scriptlet chặn lại.
+
+---
+
+## 7. Video Không Mở Được Tầng Nổi Vì YouTube SPA Router Bỏ Qua `shouldOverrideUrlLoading`
+
+### Hiện tượng
+Khi triển khai tính năng In-App MiniPlayer 2 tầng, người dùng bấm vào bất kỳ video nào trên trang chủ thì video vẫn mở thẳng trong WebView trang chủ, tầng phát nổi `playerPanel` không bao giờ được kích hoạt.
+
+### Nguyên nhân đã xác minh
+YouTube Mobile Web là Single Page Application (SPA). Khi người dùng bấm vào một video, router nội bộ của YouTube chặn sự kiện click và gọi `history.pushState(..., '/watch?v=...')`.
+Android WebView **không kích hoạt callback `WebViewClient.shouldOverrideUrlLoading`** đối với các thay đổi URL nội bộ do `history.pushState` hoặc script SPA tạo ra.
+
+### Cách khắc phục (Đã sửa tại commit `59747ff`)
+Tiêm scriptlet `browseWatchInterceptorJs` vào Browse WebView:
+1. Đăng ký listener tại **Capture Phase** (`useCapture = true`) trên `document` để đón đầu mọi click vào thẻ `<a>` chứa `/watch`.
+2. Hook cả `history.pushState` và `history.replaceState`.
+3. Khi phát hiện URL `/watch` (loại trừ `/shorts/`), gọi `e.preventDefault()`, `e.stopImmediatePropagation()` và chuyển quyền điều khiển sang Native thông qua `window.AndroidBridge.openWatchLayer(url)`.
+
+---
+
+## 8. Kẹt Nút Play/Pause & Ngắt Âm Thanh Khi Thoát PiP Phóng To Lại Ứng Dụng
+
+### Hiện tượng
+Khi video đang phát trong cửa sổ PiP, người dùng bấm phóng to trở lại ứng dụng thì nút Play/Pause bị kẹt (không thể bấm được hoặc hiển thị sai trạng thái), đôi khi video bị dừng tiếng cho đến khi người dùng tua video.
+
+### Nguyên nhân đã xác minh
+1. Quá trình resize khung nhìn đột ngột từ nhỏ lên toàn màn hình kích hoạt bẫy auto-pause của YouTube.
+2. Trình phát Web component của YouTube rơi vào trạng thái ngủ đông controls khi thoát PiP.
+
+### Cách khắc phục (Đã sửa tại `pip_controller.js`)
+1. Cấp cờ bảo vệ `__braveProtectPlayUntil = Date.now() + 2500` chặn auto-pause trong 2.5 giây đầu sau khi phóng to.
+2. Triển khai cơ chế **Micro-Seek Re-render Kick**: Gán lại `video.currentTime = video.currentTime` kết hợp dispatch sự kiện `seeking`, `seeked`, `timeupdate` và gọi `player.wakeUpControls()`, `player.updateDimensions()` để đánh thức ngay lập tức pipeline hiển thị và điều khiển của YouTube.

@@ -8,96 +8,74 @@ Tài liệu này tổng hợp toàn bộ các tính năng đã được triển 
 
 | Tên Tính Năng | Mô Tả Ngắn Gọn | Trạng Thái | File Liên Quan |
 | :--- | :--- | :--- | :--- |
-| **1. Chặn quảng cáo tầng mạng (Native Filter)** | Chặn các request HTTP/HTTPS tới các domain quảng cáo và telemetry từ tầng native. | **Đã triển khai** | `AdBlockEngine.kt`<br>`AppWebViewClient.kt`<br>`filters/blocked_domains.txt` |
-| **2. Gọt sạch API InnerTube** | Chặn các payload quảng cáo lồng trong phản hồi JSON của YouTube Player API. | **Đã triển khai** | `youtube_defuser.js`<br>`AppWebViewClient.kt` |
-| **3. Khắc chế SSAI (Quảng cáo ghép luồng)** | Tự phát hiện quảng cáo nhúng trong video stream, tua nhanh 16x, ngắt tiếng và bấm skip tự động. | **Đã triển khai** | `youtube_defuser.js` |
-| **4. Chống dừng video ngầm** | Bẻ khóa Page Visibility API và chặn các lệnh `pause()` tự động phát sinh khi ẩn màn hình. | **Đã triển khai** | `youtube_defuser.js`<br>`pip_controller.js`<br>`KeepAliveWebView.kt` |
-| **5. Cosmetic Filtering (Làm sạch DOM)** | Ẩn banner quảng cáo, gợi ý cài đặt ứng dụng YouTube và hộp thoại làm phiền. | **Đã triển khai** | `cosmetic_rules.css`<br>`AppWebViewClient.kt` |
-| **6. Picture-in-Picture (PiP) tự động & thủ công** | Chuyển video thành cửa sổ nổi khi vuốt Home hoặc thu nhỏ màn hình. | **Đã triển khai** | `MainActivity.kt`<br>`pip_controller.js`<br>`activity_main.xml` |
-| **7. Nút điều khiển Play/Pause trên PiP** | Nút RemoteAction trên cửa sổ PiP điều khiển phát/dừng chính xác trên Android 13/14. | **Đã triển khai** | `MainActivity.kt`<br>`pip_controller.js` |
-| **8. Khớp tỉ lệ PiP linh hoạt (Dynamic Aspect Ratio)** | Cửa sổ PiP tự động co giãn theo tỉ lệ thật của video (16:9, 4:3, dọc 9:16). | **Đã triển khai** | `MainActivity.kt`<br>`youtube_defuser.js`<br>`pip_controller.js` |
-| **9. Phát âm thanh khi tắt màn hình** | Giữ âm thanh tiếp tục phát thông qua Foreground Service và WakeLock. | **Đã triển khai** | `MediaService.kt`<br>`MainActivity.kt`<br>`AndroidManifest.xml` |
-| **10. Xoay ngang toàn màn hình tự động** | Tự động chuyển orientation sang LANDSCAPE khi bấm nút Fullscreen của video web. | **Đã triển khai** | `MainActivity.kt`<br>`activity_main.xml` |
-| **11. Bắt liên kết YouTube (Deep Links)** | Mở trực tiếp các URL YouTube (`m.youtube.com`, `youtu.be`) trong ứng dụng. | **Đã triển khai** | `AndroidManifest.xml`<br>`MainActivity.kt` |
-| **12. Tối ưu bộ nhớ & Chống đen hình** | Tắt `offscreenPreRaster` và đặt `setLayerType(LAYER_TYPE_NONE)` để tiết kiệm RAM và hiển thị mượt mà. | **Đã triển khai** | `MainActivity.kt` |
+| **1. In-App MiniPlayer 2 Tầng** | Lớp xem video trượt nổi độc lập, vuốt xuống thu nhỏ ở đáy, giữ nguyên trang chủ bên dưới. | **Đã triển khai** | `MainActivity.kt`<br>`AppWebViewClient.kt`<br>`activity_main.xml` |
+| **2. Bắt chặn SPA Watch Router** | Bắt click Capture Phase và hook `pushState` để mở video trên tầng nổi mà không reload trang chủ. | **Đã triển khai** | `AppWebViewClient.kt`<br>`MainActivity.kt` |
+| **3. Chặn quảng cáo tầng mạng (Native)** | Chặn các request HTTP/HTTPS tới các domain quảng cáo và telemetry từ tầng native. | **Đã triển khai** | `AdBlockEngine.kt`<br>`AppWebViewClient.kt`<br>`filters/blocked_domains.txt` |
+| **4. Gọt sạch API InnerTube** | Chặn các payload quảng cáo lồng trong phản hồi JSON của YouTube Player API. | **Đã triển khai** | `youtube_defuser.js`<br>`AppWebViewClient.kt` |
+| **5. Khắc chế SSAI (Quảng cáo ghép luồng)** | Tự phát hiện quảng cáo nhúng trong video stream, tua nhanh 16x, ngắt tiếng và bấm skip tự động chỉ trong 0.2s. | **Đã triển khai** | `youtube_defuser.js` |
+| **6. Điều khiển MediaSession toàn diện** | Điều khiển Play/Pause/Next/Prev/Seek trên Lockscreen, Notification, Bluetooth và Smartwatch. | **Đã triển khai** | `MediaService.kt`<br>`MainActivity.kt` |
+| **7. Picture-in-Picture (PiP) linh hoạt** | Cửa sổ nổi tự động co giãn theo tỉ lệ thật của video kèm nút điều khiển Play/Pause native. | **Đã triển khai** | `MainActivity.kt`<br>`pip_controller.js`<br>`activity_main.xml` |
+| **8. Bảo vệ phát PiP & Micro-Seek** | Ngăn auto-pause khi chuyển đổi PiP, đánh thức pipeline re-render của YouTube không bị kẹt nút. | **Đã triển khai** | `pip_controller.js`<br>`youtube_defuser.js`<br>`MainActivity.kt` |
+| **9. Phát âm thanh khi tắt màn hình** | Giữ âm thanh tiếp tục phát thông qua Foreground Service và WakeLock tối đa 2 giờ. | **Đã triển khai** | `MediaService.kt`<br>`MainActivity.kt`<br>`AndroidManifest.xml` |
+| **10. Kéo để tải lại (Swipe-to-Refresh)** | Kéo từ trên xuống để làm mới trang chủ mượt mà theo phong cách Dark Mode. | **Đã triển khai** | `MainActivity.kt`<br>`activity_main.xml` |
+| **11. Menu Cài đặt Native trong `select_site`** | Tích hợp mục "Cài đặt YouTube Lite" vào trang `select_site` mở BottomSheet tùy biến. | **Đã triển khai** | `MainActivity.kt`<br>`AppSettings.kt`<br>`AppWebViewClient.kt`<br>`dialog_settings.xml` |
+| **12. Bộ nhớ đệm tài nguyên tĩnh (Static Cache)** | Lưu trữ cục bộ các script, font, icon tĩnh giúp tăng tốc mở trang và tiết kiệm 4G/5G. | **Đã triển khai** | `WebResourceCacheManager.kt`<br>`AppWebViewClient.kt` |
+| **13. Cosmetic Filtering (Làm sạch DOM)** | Ẩn banner quảng cáo, gợi ý cài đặt ứng dụng YouTube và hộp thoại làm phiền. | **Đã triển khai** | `cosmetic_rules.css`<br>`AppWebViewClient.kt` |
+| **14. Tự động xoay toàn màn hình** | Tự động chuyển orientation sang LANDSCAPE khi bấm nút Fullscreen của video web. | **Đã triển khai** | `MainActivity.kt`<br>`activity_main.xml` |
+| **15. Tối ưu bộ nhớ & Chống đen hình** | Tắt `offscreenPreRaster` và đặt `setLayerType(LAYER_TYPE_NONE)` để tiết kiệm RAM. | **Đã triển khai** | `MainActivity.kt` |
 
 ---
 
-## 2. Chi Tiết Từng Tính Năng
+## 2. Chi Tiết Từng Tính Năng Mới
 
-### Tính năng 1: Chặn quảng cáo tầng mạng (Native Filter)
-- **Mục đích:** Ngăn các request quảng cáo rời khỏi thiết bị, tiết kiệm băng thông 4G/5G và giảm tải xử lý cho CPU.
-- **Dữ liệu vào:** Chuỗi URL từ `WebResourceRequest.url.toString()`.
+### Tính năng 1: In-App MiniPlayer 2 Tầng (Sliding Sheet)
+- **Mục đích:** Mang lại trải nghiệm vừa xem video vừa duyệt trang chủ y hệt ứng dụng YouTube Native, khắc phục nhược điểm mất trang chủ của trình duyệt web thông thường.
+- **Cấu trúc:**
+  - `swipeRefreshLayout` chứa `webView` (Browse View): Duyệt trang chủ, tab đăng ký, tìm kiếm.
+  - `playerPanel` chứa `playerWebView` (Player Layer): Chuyên dụng phát video.
+- **Trạng thái (PanelState):**
+  - `EXPANDED`: `playerPanel` bung toàn màn hình (`MATCH_PARENT`), phát video chất lượng cao.
+  - `COLLAPSED`: Trượt xuống đáy màn hình và thu gọn layout chỉ còn đúng **64dp**. Video thu nhỏ tỉ lệ 16:9 ở góc trái (104dp x 58dp); bên phải là thông tin tiêu đề, tên kênh, nút Play/Pause và nút Đóng [X].
+  - `HIDDEN`: Ẩn hoàn toàn `playerPanel`, nạp `about:blank` vào `playerWebView` để giải phóng bộ nhớ.
+- **Giải phóng touch:** Khi ở `COLLAPSED`, kích thước `playerPanel` co về đúng 64dp ở đáy (`Gravity.BOTTOM`), vùng màn hình từ 0 đến H-64dp hoàn toàn tự do cho `webView` trang chủ nhận cảm ứng.
+
+---
+
+### Tính năng 2: Bộ Chặn SPA Watch Router (`browseWatchInterceptorJs`)
+- **Mục đích:** Chặn router nội bộ của YouTube Mobile Web (`m.youtube.com`) tự ý chuyển trang trên Browse View khi người dùng bấm vào video.
+- **Cơ chế hoạt động:**
+  1. **Capture Phase Click Listener:** Đăng ký listener trên `document` với `useCapture = true` để đón đầu mọi event trước khi YouTube xử lý. Kiểm tra `target.closest('a')` hoặc thẻ cha của video container.
+  2. **Hook History API:** Ghi đè `history.pushState` và `history.replaceState`.
+  3. **Lắng nghe sự kiện Polymer:** Bắt sự kiện `yt-navigate`.
+  4. Nếu URL chứa `/watch` và **không chứa `/shorts/`**:
+     - Gọi `e.preventDefault()`, `e.stopImmediatePropagation()`.
+     - Gọi Native: `window.AndroidBridge.openWatchLayer(fullUrl)`.
+     - Ngăn Browse View thay đổi URL, giữ nguyên feed trang chủ 100%!
+
+---
+
+### Tính năng 6: Hệ Thống Điều Khiển Đa Phương Tiện Toàn Diện (`MediaSession`)
+- **Mục đích:** Đồng bộ trạng thái phát và cho phép điều khiển video từ Màn hình khóa, Thanh thông báo, Tai nghe Bluetooth và Đồng hồ thông minh.
 - **Xử lý:**
-  1. `AdBlockEngine.isBlocked(url)` bóc tách host và path.
-  2. Tra cứu $O(1)$ trong `HashSet<String>`.
-  3. Kiểm tra đuôi subdomain và các path telemetry đặc thù (`/api/stats/ads`, `/pagead/`, `/youtubei/v1/log_event`).
-- **Dữ liệu ra:** Trả về `WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))` (chặn) hoặc `super.shouldInterceptRequest()` (cho qua).
-- **Lưu ý bảo trì:** Khi bổ sung domain quảng cáo mới, chỉ cần thêm vào file `app/src/main/assets/filters/blocked_domains.txt`.
+  - `MediaService` khởi tạo `MediaSessionCompat`.
+  - Thiết lập `PlaybackStateCompat` với các hành động: `ACTION_PLAY`, `ACTION_PAUSE`, `ACTION_SKIP_TO_NEXT`, `ACTION_SKIP_TO_PREVIOUS`, `ACTION_SEEK_TO`.
+  - Cập nhật `MediaMetadataCompat`: Tên bài hát (`METADATA_KEY_TITLE`), Tên kênh (`METADATA_KEY_ARTIST`), Thời lượng (`METADATA_KEY_DURATION`).
+  - Sử dụng `NotificationCompat.MediaStyle().setMediaSession(mediaSession.sessionToken)` hiển thị giao diện media notification chuẩn Android 13/14.
 
 ---
 
-### Tính năng 2: Gọt sạch API InnerTube
-- **Mục đích:** Loại bỏ thông tin quảng cáo ngay khi YouTube tải dữ liệu video, ngăn trình phát Web kích hoạt chế độ chạy quảng cáo.
-- **Xử lý:**
-  - Tiêm scriptlet tại thời điểm `DOCUMENT_START` bằng `WebViewCompat.addDocumentStartJavaScript`.
-  - Override hàm `JSON.parse` của trình duyệt.
-  - Proxy `window.ytInitialPlayerResponse` bằng `Object.defineProperty`.
-  - Can thiệp `window.fetch` đối với endpoint `/youtubei/v1/player`.
-  - Hàm `sanitizePlayerObj` xóa sạch các khóa: `adPlacements`, `adSlots`, `playerAds`, `adBreakHeartbeatParams`.
-- **Dữ liệu ra:** JSON sạch được trả về cho trình phát YouTube.
+### Tính năng 8: Bảo Vệ Phát PiP & Micro-Seek Re-render Kick
+- **Mục đích:** Triệt tiêu hoàn toàn lỗi kẹt nút Play/Pause hoặc video bị ngắt tiếng khi chuyển đổi qua lại giữa App và cửa sổ PiP.
+- **Cơ chế:**
+  - Cờ thời gian `__braveProtectPlayUntil`: Khi vào hoặc thoát PiP, cấp quyền bảo vệ 2.5 - 3.5 giây, vô hiệu hóa mọi lệnh tự động pause từ kiểm tra kích thước nhỏ (`PLAYER_VIEW_TOO_SMALL`) của YouTube.
+  - Hàm `triggerMicroSeek`: Gán lại `video.currentTime = video.currentTime` kết hợp bắn sự kiện `seeking`, `seeked`, `timeupdate` và gọi `player.wakeUpControls()`, `player.updateDimensions()`. Điều này đánh thức bộ render của YouTube Player ngay lập tức khi kích thước màn hình thay đổi.
 
 ---
 
-### Tính năng 3: Khắc chế SSAI (Server-Side Ad Insertion)
-- **Mục đích:** Xử lý các quảng cáo được chèn trực tiếp vào luồng stream video mà bộ lọc mạng không thể chặn theo URL.
-- **Cơ chế kích hoạt:** Vòng lặp `setInterval(..., 150ms)` trong `youtube_defuser.js` kiểm tra sự tồn tại của selector `.ad-showing, .ad-interrupting, .video-ads, [class*="ytp-ad-player-overlay"]`.
-- **Hành động:**
-  1. Đặt `video.muted = true` (lưu lại âm lượng gốc).
-  2. Đặt `video.playbackRate = 16.0`.
-  3. Gán `video.currentTime = video.duration`.
-  4. Mô phỏng sự kiện bấm chuột (`btn.click()`) trên tất cả các nút skip (`.ytp-ad-skip-button`).
-- **Khôi phục:** Khi hết quảng cáo, trả lại `playbackRate = 1.0`, `muted = false` và khôi phục âm lượng gốc.
-
----
-
-### Tính năng 4: Chống tự dừng video ngầm & Giả lập Page Visibility
-- **Mục đích:** YouTube thường dừng video khi tab bị ẩn hoặc khi kích thước khung nhìn quá nhỏ (lỗi `PLAYER_VIEW_TOO_SMALL`).
-- **Xử lý:**
-  - Chặn lan truyền các sự kiện `visibilitychange`, `webkitvisibilitychange`, `pagehide` bằng `e.stopImmediatePropagation()`.
-  - Ghi đè `document.hidden = false` và `document.visibilityState = 'visible'`.
-  - Ghi đè `HTMLMediaElement.prototype.pause`: Chỉ cho phép lệnh `pause` thực thi nếu có cờ `__isUserExplicitPause` (người dùng bấm nút tạm dừng) hoặc cờ thời gian `__braveAllowPauseUntil` (bấm tạm dừng từ PiP Native). Mọi lệnh `pause` do YouTube tự phát sinh đều bị bỏ qua.
-
----
-
-### Tính năng 5: Picture-in-Picture (PiP) và Bộ điều khiển `pip_controller.js`
-- **Mục đích:** Đảm bảo khi vào PiP, video hiển thị trọn vẹn 100% khung hình, không bị các thành phần web khác đè lên.
-- **Xử lý:**
-  - Gán `data-brave-pip-mode="on"` vào thẻ `<html>`.
-  - Gán `data-brave-pip-role="video"` vào thẻ `<video>` chính.
-  - Gán `data-brave-pip-role="ancestor"` vào chuỗi thẻ cha từ video lên `<body>`.
-  - Áp dụng luật CSS: Mọi phần tử `:not([data-brave-pip-role])` đều bị `display: none !important`.
-  - Thẻ cha được đặt `position: fixed !important; background: transparent !important`.
-  - Video phủ kín `100vw x 100vh; object-fit: contain !important`.
-- **Cơ chế thoát:** Gọi `pip_controller.js exit()`, gỡ bỏ class/attribute và phát sự kiện `resize` sau các nhịp 0ms, 150ms, 350ms để YouTube tính lại khung player.
-
----
-
-### Tính năng 6: Nút Play/Pause trên PiP & Android 14 SystemUI Exported Receiver
-- **Mục đích:** Điều khiển tạm dừng và phát tiếp trực tiếp trên cửa sổ PiP của Android.
-- **Xử lý:**
-  - Tạo `RemoteAction` với `PendingIntent.getBroadcast` trỏ đến `ACTION_PIP_PLAY` hoặc `ACTION_PIP_PAUSE`.
-  - Đăng ký `BroadcastReceiver` với `ContextCompat.RECEIVER_EXPORTED` (bắt buộc cho Android 13/14 vì sự kiện phát sinh từ SystemUI).
-  - Khi nhận intent:
-    - Bấm Play $\rightarrow$ Gửi `runPipCommand("play")` $\rightarrow$ Gọi native `HTMLMediaElement.prototype.play()`.
-    - Bấm Pause $\rightarrow$ Gửi `runPipCommand("pause")` $\rightarrow$ Mở khóa cờ `allowPause(2500)` $\rightarrow$ Gọi native `HTMLMediaElement.prototype.pause()`.
-
----
-
-### Tính năng 7: Phát âm thanh trong nền qua Foreground Service (`MediaService`)
-- **Mục đích:** Người dùng có thể nghe podcast/nhạc khi tắt màn hình điện thoại mà không lo bị hệ điều hành tắt ứng dụng.
-- **Xử lý:**
-  - Trong `MainActivity.onStop()`: Nếu `isVideoPlaying == true`, kích hoạt `startMediaService()`.
-  - `MediaService` khởi chạy dưới dạng `FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK`.
-  - Kích hoạt `PowerManager.PARTIAL_WAKE_LOCK` (giữ CPU hoạt động tối đa 2 giờ).
-  - Khi người dùng mở lại app (`MainActivity.onStart()`), `MediaService` tự động dừng (`stopMediaService()`) để tối ưu pin.
+### Tính năng 11: Menu Cài Đặt Native Trong Trang `select_site`
+- **Mục đích:** Cung cấp khu vực cấu hình tiện lợi mà không làm thay đổi thanh công cụ mặc định của YouTube.
+- **Cơ chế:**
+  - Scriptlet `selectSiteSettingsScriptletJs` lắng nghe URL `https://m.youtube.com/select_site` (trang Cài đặt của YouTube Mobile).
+  - Tự động chèn một mục danh sách thanh lịch "Cài đặt YouTube Lite" có icon bánh răng vào đầu danh sách cài đặt của trang.
+  - Khi người dùng bấm vào, gọi `window.AndroidBridge.openSettings()`.
+  - Native `MainActivity` hiển thị một `BottomSheetDialog` (`dialog_settings.xml`) với các Switch Material để bật/tắt tính năng và nút xóa bộ nhớ đệm (Clear Cache).

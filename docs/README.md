@@ -8,12 +8,12 @@ Chào mừng bạn đến với hệ thống tài liệu kỹ thuật toàn di�
 
 | Tài liệu | Mô tả nội dung chính |
 | :--- | :--- |
-| **[PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)** | Giới thiệu dự án, mục tiêu kiến trúc Brave Shields 3 tầng, công nghệ sử dụng, cấu hình build và trạng thái phát triển. |
-| **[ARCHITECTURE.md](./ARCHITECTURE.md)** | Kiến trúc tổng thể, mô hình kết hợp Native (Kotlin) + Web Engine (Chromium WebView), cơ chế phòng thủ 3 lớp và sơ đồ kiến trúc Mermaid. |
+| **[PROJECT_OVERVIEW.md](./PROJECT_OVERVIEW.md)** | Giới thiệu dự án, mục tiêu kiến trúc Brave Shields 3 tầng, In-App MiniPlayer 2 tầng, công nghệ sử dụng, cấu hình build và trạng thái phát triển. |
+| **[ARCHITECTURE.md](./ARCHITECTURE.md)** | Kiến trúc tổng thể, mô hình 2 tầng View (Browse View + Player Layer), cơ chế phòng thủ 3 lớp và sơ đồ kiến trúc Mermaid. |
 | **[FILE_STRUCTURE.md](./FILE_STRUCTURE.md)** | Bản đồ cây thư mục chi tiết, giải thích vai trò của từng file mã nguồn, file cấu hình, assets và tài nguyên giao diện. |
-| **[FEATURES.md](./FEATURES.md)** | Bảng tổng hợp tính năng chi tiết: Trạng thái triển khai, file phụ thuộc, dữ liệu I/O, điều kiện kích hoạt và lưu ý kỹ thuật. |
-| **[DATA_FLOW.md](./DATA_FLOW.md)** | Các luồng dữ liệu quan trọng: Luồng khởi động, luồng IPC (JavaScript $\leftrightarrow$ Kotlin), luồng chặn mạng $O(1)$, luồng chuyển đổi PiP và phát âm thanh nền. |
-| **[KOTLIN_ANDROID_GUIDE.md](./KOTLIN_ANDROID_GUIDE.md)** | Phân tích chi tiết các lớp Kotlin Native: `MainActivity`, `KeepAliveWebView`, `MediaService`, `AdBlockEngine`, `AppWebViewClient`. |
+| **[FEATURES.md](./FEATURES.md)** | Bảng tổng hợp tính năng chi tiết: In-App MiniPlayer, MediaSession, Static Cache, Settings, PiP Micro-Seek, điều kiện kích hoạt và lưu ý kỹ thuật. |
+| **[DATA_FLOW.md](./DATA_FLOW.md)** | Các luồng dữ liệu quan trọng: Luồng mở video và MiniPlayer, luồng MediaSession hệ thống, luồng cache tĩnh, luồng IPC và chuyển đổi PiP. |
+| **[KOTLIN_ANDROID_GUIDE.md](./KOTLIN_ANDROID_GUIDE.md)** | Phân tích chi tiết các lớp Kotlin Native: `MainActivity`, `WebResourceCacheManager`, `AppSettings`, `KeepAliveWebView`, `MediaService`, `AdBlockEngine`, `AppWebViewClient`. |
 | **[SCRIPTLETS_AND_FILTERS_GUIDE.md](./SCRIPTLETS_AND_FILTERS_GUIDE.md)** | Phân tích chi tiết các Scriptlet và Bộ lọc: `pip_controller.js`, `youtube_defuser.js`, `cosmetic_rules.css`, `blocked_domains.txt`. |
 | **[API_AND_STORAGE.md](./API_AND_STORAGE.md)** | Giao thức truyền thông IPC (`AndroidBridge`), Broadcast Intents, Service Actions, cấu hình bộ nhớ đệm và can thiệp InnerTube API. |
 | **[DEVELOPMENT_GUIDE.md](./DEVELOPMENT_GUIDE.md)** | Hướng dẫn môi trường, quy trình build APK (Local CLI & GitHub Actions CI/CD), quy tắc thêm bộ lọc và debug qua `chrome://inspect`. |

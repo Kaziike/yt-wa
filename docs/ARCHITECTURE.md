@@ -2,73 +2,139 @@
 
 ## 1. Sơ Đồ Kiến Trúc Tổng Thể
 
-YouTube Lite được thiết kế theo mô hình lai (Hybrid Native-Web Architecture) lấy cảm hứng từ cấu trúc phân tầng của trình duyệt **Brave Browser**. Hệ thống phân chia ranh giới rõ ràng giữa **Tầng Native Android (Kotlin)** và **Tầng Web Engine (Chromium WebView & Scriptlets)**.
+YouTube Lite được thiết kế theo mô hình lai (Hybrid Native-Web Architecture) kết hợp kiến trúc phòng thủ của trình duyệt **Brave Browser** và mô hình **2 Tầng View Độc Lập (Dual-Layer Native Sliding Sheet)**:
 
 ```mermaid
 graph TD
     subgraph "HỆ ĐIỀU HÀNH ANDROID (OS Level)"
         SystemUI["Hệ thống Android SystemUI<br>(PiP Window Controls, Notification)"]
+        MediaCtl["MediaSession & LockScreen<br>(Bluetooth, Smartwatch, Lockscreen)"]
         PowerMgr["PowerManager<br>(PARTIAL_WAKE_LOCK)"]
         AudioSubs["Audio Subsystem<br>(AudioTrack / AudioFocus)"]
     end
 
     subgraph "TẦNG NATIVE ANDROID (Kotlin)"
-        MainActivity["MainActivity<br>- Điều phối vòng đời Activity<br>- Quản lý PiP & Auto-rotate<br>- Đăng ký BroadcastReceiver"]
-        KeepAliveView["KeepAliveWebView<br>- Override dispatchWindowVisibilityChanged<br>- Báo cáo View.VISIBLE liên tục"]
-        MediaSvc["MediaService (Foreground)<br>- Foreground Service Type: mediaPlayback<br>- Giữ WakeLock tối đa 2 giờ"]
-        AdEngine["AdBlockEngine (Singleton)<br>- Nạp danh sách blocked_domains.txt<br>- Khớp URL O(1)"]
-        Client["AppWebViewClient<br>- shouldInterceptRequest()<br>- Cài đặt DOCUMENT_START_SCRIPT"]
-    end
+        MainActivity["MainActivity<br>- Điều phối 2 Tầng View<br>- Quản lý MiniPlayer Gestures & Animation<br>- Quản lý PiP & Auto-rotate<br>- Hiển thị BottomSheet Settings"]
+        
+        subgraph "TẦNG 1: BROWSE VIEW (Duyệt nội dung)"
+            SwipeRefresh["SwipeRefreshLayout<br>(Kéo để làm mới)"]
+            BrowseWebView["webView (KeepAliveWebView)<br>- Duyệt Trang chủ, Kênh, Tìm kiếm...<br>- Giữ nguyên vị trí cuộn & feed"]
+            BrowseClient["AppWebViewClient (isBrowseMode=true)<br>- Tiêm browseWatchInterceptorJs<br>- Chặn SPA pushState & click watch"]
+        end
 
-    subgraph "TẦNG TRÌNH DUYỆT (Chromium Engine & WebView)"
-        ChromiumCore["Chromium Blink Engine<br>- Hardware Rendering (hardwareAccelerated)<br>- Audio Pipeline"]
-        IPCBridge["AndroidBridge (JavascriptInterface)<br>- onVideoPlaying()<br>- onVideoPaused()<br>- onVideoSize()"]
+        subgraph "TẦNG 2: PLAYER LAYER (Phát Video & MiniPlayer)"
+            PlayerPanel["playerPanel (FrameLayout)<br>- Trượt đè lên / Thu nhỏ 64dp ở đáy"]
+            PlayerWebView["playerWebView (KeepAliveWebView)<br>- Chuyên dụng phát video & PiP"]
+            MiniPlayerBar["miniPlayerBar (LinearLayout)<br>- Video thu nhỏ 16:9 bên trái<br>- Tiêu đề, Play/Pause, Close bên phải"]
+            PlayerClient["AppWebViewClient (isBrowseMode=false)<br>- Tiêm pip_controller & youtube_defuser"]
+        end
+
+        subgraph "SERVICES & SINGLETONS"
+            MediaSvc["MediaService (Foreground)<br>- Quản lý MediaSessionCompat<br>- NotificationCompat.MediaStyle<br>- Giữ WakeLock tối đa 2 giờ"]
+            CacheMgr["WebResourceCacheManager<br>- Bộ nhớ đệm tài nguyên tĩnh (JS/CSS/Font)<br>- Chặn & trả cache tại shouldInterceptRequest"]
+            AdEngine["AdBlockEngine (Singleton)<br>- Nạp blocked_domains.txt<br>- Khớp URL O(1)"]
+            Settings["AppSettings<br>- Quản lý SharedPreferences<br>- Đồng bộ cấu hình xuống Web Engine"]
+        end
     end
 
     subgraph "TẦNG WEB SHIELDS (JavaScript & CSS Scriptlets)"
         DocStart["Document Start Trigger<br>(WebViewCompat)"]
+        WatchInterceptor["browseWatchInterceptorJs<br>- Capture Phase Click Listener<br>- Hook history.pushState/replaceState<br>- Bắn AndroidBridge.openWatchLayer()"]
         Defuser["youtube_defuser.js<br>- Gọt InnerTube API JSON<br>- SSAI 16x Fast-forward<br>- Chặn auto-pause khi ẩn"]
-        PiPController["pip_controller.js<br>- Cô lập DOM [data-brave-pip-role]<br>- Quản lý play/pause trực tiếp<br>- Giám sát viewport resize"]
+        PiPController["pip_controller.js<br>- Cô lập DOM [data-brave-pip-role]<br>- Quản lý play/pause trực tiếp<br>- Micro-Seek Kick khi vào/ra PiP"]
         CosmeticCSS["cosmetic_rules.css<br>- Ẩn banner quảng cáo, gợi ý app<br>- Nạp qua Base64 + textContent (CSP Safe)"]
+        SelectSite["selectSiteSettingsScriptletJs<br>- Nhét mục Cài đặt vào m.youtube.com/select_site"]
     end
 
-    %% Tương tác giữa các khối
+    %% Tương tác
     SystemUI <-->|Broadcast: ACTION_PIP_PLAY/PAUSE| MainActivity
-    MainActivity -->|Quản lý trạng thái & UI| KeepAliveView
-    MainActivity -->|Khởi chạy / Dừng khi tắt màn hình| MediaSvc
-    MediaSvc -->|Giữ CPU hoạt động| PowerMgr
-    
-    KeepAliveView --> Client
-    Client -->|Kiểm tra URL| AdEngine
-    Client -->|Nạp Scriptlet ngay trước DOM| DocStart
-    
-    DocStart --> Defuser
-    DocStart --> PiPController
-    DocStart --> CosmeticCSS
+    MediaCtl <-->|MediaSessionCompat Callbacks| MediaSvc
+    MainActivity --> MediaSvc
+    MediaSvc --> PowerMgr
 
-    Defuser -->|Đồng bộ metadata & size| IPCBridge
-    PiPController -->|Báo kích thước video| IPCBridge
-    IPCBridge -->|Cập nhật trạng thái| MainActivity
-    
+    BrowseWebView --> BrowseClient
+    BrowseClient --> AdEngine
+    BrowseClient --> CacheMgr
+    BrowseClient --> WatchInterceptor
+    WatchInterceptor -->|openWatchLayer(url)| MainActivity
+
+    PlayerWebView --> PlayerClient
+    PlayerClient --> AdEngine
+    PlayerClient --> CacheMgr
+    PlayerClient --> Defuser
+    PlayerClient --> PiPController
+    PlayerClient --> CosmeticCSS
+
+    MainActivity -->|Điều khiển trượt/bung/thu nhỏ| PlayerPanel
     MainActivity -->|runPipCommand: enter/exit/play/pause| PiPController
-    ChromiumCore --> AudioSubs
+    PlayerWebView --> AudioSubs
 ```
 
 ---
 
-## 2. Mô Hình Phòng Thủ 3 Tầng (Brave Shields 3-Tier Model)
+## 2. Kiến Trúc 2 Tầng View & In-App MiniPlayer (Dual-Layer Native Sliding Sheet)
 
-Khác với các ứng dụng chặn quảng cáo truyền thống chỉ can thiệp một điểm, YouTube Lite triển khai cơ chế 3 tầng phòng thủ độc lập nhưng tương hỗ chặt chẽ:
+### Vấn Đề Của Trình Duyệt Web Truyền Thống:
+Trên các trình duyệt di động hoặc Web wrapper đơn giản, khi người dùng đang ở Trang chủ và bấm vào 1 video:
+- Trang web chuyển hoàn toàn sang URL `/watch?v=...`.
+- Khi người dùng muốn tìm video khác, họ phải nhấn Back, khiến trang chủ bị tải lại từ đầu, mất sạch vị trí cuộn và danh sách gợi ý.
+
+### Giải Pháp 2 Tầng View Độc Quyền Của YouTube Lite:
+Hệ thống sử dụng **2 cá thể WebView độc lập** được điều phối bởi Native Android:
+
+```
+┌────────────────────────────────────────────────────────┐
+│  MÀN HÌNH CHÍNH (MainActivity)                         │
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ TẦNG TRÊN: playerPanel (Sliding Player Layer)    │  │
+│  │                                                  │  │
+│  │ [EXPANDED]: Che kín toàn màn hình khi xem video  │  │
+│  │                                                  │  │
+│  │ [COLLAPSED]: Thu nhỏ thành MiniPlayer Bar (64dp) │  │
+│  │  ┌──────────┬──────────────────────┬───┬───┐    │  │
+│  │  │ Video    │ Tiêu đề video & kênh │ ▶ │ ✕ │    │  │
+│  │  └──────────┴──────────────────────┴───┴───┘    │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ TẦNG DƯỚI: SwipeRefreshLayout + webView (Browse) │  │
+│  │                                                  │  │
+│  │ • Duyệt Trang chủ, Kênh đăng ký, Tìm kiếm...     │  │
+│  │ • 100% Giữ nguyên vị trí cuộn & feed             │  │
+│  │ • Hoàn toàn không bị che khuất khi MiniPlayer    │  │
+│  │   thu nhỏ ở đáy!                                 │  │
+│  └──────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────┘
+```
+
+1. **Tầng Dưới (`webView` - Browse View):**
+   - Chỉ đảm nhiệm việc duyệt bảng tin (Trang chủ, Tab Đăng ký, Tìm kiếm, Trang Kênh cá nhân).
+   - Được bảo vệ bởi scriptlet `browseWatchInterceptorJs`.
+   - Khi người dùng bấm vào một video trên trang chủ: Scriptlet bắt sự kiện `click` ở Capture Phase và hook `history.pushState` của SPA router, chặn không cho `webView` chuyển trang, đồng thời bắn URL video sang Native thông qua `AndroidBridge.openWatchLayer(url)`.
+
+2. **Tầng Trên (`playerPanel` - Player Layer):**
+   - Chứa `playerWebView` chuyên trách phát video, xử lý âm thanh, fullscreen và PiP.
+   - Khi nhận URL từ tầng dưới, `playerPanel` bung to (`EXPANDED`) và bắt đầu phát video.
+   - Khi người dùng vuốt xuống (`playerDragArea`) hoặc bấm nút mũi tên xuống: `collapsePlayer()` trượt xuống đáy và co kích thước của `playerPanel` về đúng **64dp** ở đáy màn hình.
+   - Video thu nhỏ được scale mượt mà vào khung 104dp bên trái thanh `miniPlayerBar`. Toàn bộ vùng màn hình phía trên thuộc về `webView`, cho phép người dùng cuộn và tương tác trang chủ 100% tự do.
+
+---
+
+## 3. Mô Hình Phòng Thủ 3 Tầng (Brave Shields 3-Tier Model)
 
 ```mermaid
 flowchart LR
-    Request["Request Mạng từ YouTube"] --> Tier1{"TẦNG 1: Native Network Filter<br>(AdBlockEngine)"}
+    Request["Request Mạng từ YouTube"] --> CacheCheck{"Kiểm tra Cache Tĩnh<br>(WebResourceCacheManager)"}
+    CacheCheck -->|Có trong Cache| ReturnCached["Trả về dữ liệu bộ nhớ đệm (0ms)"]
+    CacheCheck -->|Không có trong Cache| Tier1{"TẦNG 1: Native Network Filter<br>(AdBlockEngine)"}
+    
     Tier1 -->|Trùng Domain/Endpoint Quảng cáo| Drop["Chặn lập tức O(1)<br>(WebResourceResponse rỗng)"]
-    Tier1 -->|Hợp lệ| Pass["Cho phép tải tài nguyên"]
+    Tier1 -->|Hợp lệ| Pass["Tải từ mạng qua Chromium Engine"]
     
     Pass --> Tier2{"TẦNG 2: Client Defusers<br>(youtube_defuser.js)"}
     Tier2 -->|InnerTube Player API| Sanitize["Gọt sạch adPlacements & adSlots"]
-    Tier2 -->|SSAI Ghép luồng vào video| Speedup["Tua 16x + Mute + Auto-skip"]
+    Tier2 -->|SSAI Ghép luồng vào video| Speedup["Tua 16x + Mute + Auto-skip (0.2s)"]
     Tier2 -->|Sự kiện visibilitychange| BlockPause["Vô hiệu hóa lệnh pause ngầm"]
     
     Tier2 --> Tier3{"TẦNG 3: Cosmetic DOM Filter<br>(cosmetic_rules.css)"}
@@ -76,80 +142,35 @@ flowchart LR
 ```
 
 ### Tầng 1: Native Network Filtering (`AdBlockEngine.kt`)
-- **Điểm chặn:** `WebViewClient.shouldInterceptRequest(view, request)`.
+- **Điểm can thiệp:** `WebViewClient.shouldInterceptRequest(view, request)`.
 - **Cơ chế:**
-  - Đối chiếu URL bằng `HashSet<String>` nạp từ `filters/blocked_domains.txt` trong thời gian $O(1)$.
-  - Hỗ trợ kiểm tra domain chính xác, kiểm tra subdomain (`host.endsWith(".$blocked")`) và các endpoint telemetry ngầm (`/api/stats/ads`, `/pagead/`, `/youtubei/v1/log_event`).
-  - Nếu phát hiện quảng cáo, trả về `WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))` ngay lập tức, triệt tiêu lưu lượng mạng trước khi nó chạm đến CPU.
+  - Tra cứu trong `HashSet<String>` nạp từ `filters/blocked_domains.txt` trong thời gian $O(1)$.
+  - Hỗ trợ domain chính xác, subdomain (`host.endsWith(".$blocked")`) và các endpoint telemetry ngầm (`/api/stats/ads`, `/pagead/`, `/youtubei/v1/log_event`).
+  - Nếu phát hiện quảng cáo, trả về `WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))` ngay lập tức.
 
 ### Tầng 2: Scriptlet & API Defuser (`youtube_defuser.js`)
-- **Điểm kích hoạt:** `WebViewCompat.addDocumentStartJavaScript()` (thời điểm `DOCUMENT_START`, thực thi trước khi bất kỳ script nào của trang YouTube chạy).
+- **Điểm kích hoạt:** `WebViewCompat.addDocumentStartJavaScript()` (thời điểm `DOCUMENT_START`).
 - **Cơ chế:**
-  - **Làm sạch JSON API:** Ghi đè `JSON.parse` và proxy đối tượng `window.ytInitialPlayerResponse` cùng `window.fetch` (`/youtubei/v1/player`). Xóa bỏ hoàn toàn các trường `adPlacements`, `adSlots`, `playerAds`.
+  - **Gọt JSON API:** Ghi đè `JSON.parse` và proxy đối tượng `window.ytInitialPlayerResponse` cùng `window.fetch` (`/youtubei/v1/player`). Xóa bỏ hoàn toàn các trường `adPlacements`, `adSlots`, `playerAds`.
   - **Khắc chế SSAI (Server-Side Ad Insertion):** Khi quảng cáo được chèn trực tiếp vào luồng stream video chính (`.ad-showing`), vòng lặp giám sát 150ms sẽ:
     1. Bật `muted = true`.
     2. Đẩy tốc độ phát `playbackRate = 16.0`.
     3. Gán `currentTime = duration` để tua đến khung hình cuối.
     4. Tìm và kích hoạt toàn bộ các nút skip (`.ytp-ad-skip-button`).
-    $\rightarrow$ Quảng cáo 30s kết thúc trong ~0.2 giây mà không phát ra tiếng.
+    $\rightarrow$ Quảng cáo kết thúc trong ~0.2 giây mà không phát ra tiếng.
   - **Bảo vệ luồng âm thanh:** Chặn sự kiện `visibilitychange`, `webkitvisibilitychange`, `pagehide` và ghi đè getter của `document.hidden = false`, `document.visibilityState = 'visible'`.
 
 ### Tầng 3: Cosmetic Filtering (`cosmetic_rules.css`)
-- **Cơ chế tiêm:** Nạp file CSS từ assets, mã hóa Base64 và tiêm vào trang bằng script an toàn:
+- **Cơ chế tiêm:** Nạp file CSS từ assets, mã hóa Base64 và tiêm vào trang bằng script an toàn tuân thủ Content Security Policy (Trusted Types):
   ```javascript
   style.textContent = (window.TextDecoder ? new TextDecoder('utf-8').decode(bytes) : bin);
   ```
-- **Lý do kỹ thuật:** Tránh vi phạm chính sách bảo mật **Trusted Types CSP** trên `m.youtube.com` (YouTube chặn mọi thao tác gán `innerHTML`).
-- **Nhiệm vụ:** Ẩn các banner tài trợ, thanh gợi ý "Cài đặt ứng dụng YouTube", popup cảnh báo, và gỡ bỏ `backdrop-filter` để tăng mượt mà khi cuộn trang.
 
 ---
 
-## 3. Kiến Trúc Điều Khiển Picture-in-Picture (PiP)
+## 4. Hệ Thống Bộ Nhớ Đệm Tĩnh (Static Preload Cache Manager)
 
-PiP trong YouTube Lite là sự phối hợp giữa **Android Native PiP Framework** và **DOM Isolation Engine** (`pip_controller.js`).
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Người dùng
-    participant Main as MainActivity
-    participant WebView as KeepAliveWebView
-    participant PiPJS as pip_controller.js
-    participant SysUI as Android SystemUI (PiP Window)
-
-    User->>Main: Vuốt Home hoặc Chuyển ứng dụng
-    Main->>Main: onUserLeaveHint() kích hoạt
-    Main->>PiPJS: runPipCommand("enter")
-    Note over PiPJS: Gắn [data-brave-pip-mode="on"]<br/>Ẩn toàn bộ DOM khác video<br/>Video phủ kín 100vw x 100vh
-    Main->>Main: enterPictureInPictureMode(params)
-    SysUI->>Main: Cửa sổ thu nhỏ hiển thị
-    Main->>WebView: postDelayed enterPipLayout() sau 150ms & 450ms
-    
-    Note over SysUI,Main: Người dùng tương tác trên cửa sổ PiP
-    User->>SysUI: Bấm nút Pause trên PiP
-    SysUI->>Main: Broadcast Intent ACTION_PIP_PAUSE
-    Main->>Main: pipActionReceiver.onReceive()
-    Main->>PiPJS: runPipCommand("pause")
-    PiPJS->>PiPJS: Mở khóa allowPause() & gọi native HTMLMediaElement.pause()
-    Main->>Main: updatePipParams() đổi nút thành PLAY
-```
-
-### Điểm nhấn kỹ thuật của PiP:
-1. **Cô lập thẻ Video tuyệt đối:** `pip_controller.js` đánh dấu thẻ `<video>` chính bằng `[data-brave-pip-role="video"]` và chuỗi thẻ cha bằng `[data-brave-pip-role="ancestor"]`. Toàn bộ các phần tử khác trong `<body>` được gán `display: none !important`. Điều này ngăn chặn YouTube hiển thị overlay quảng cáo hay tiêu đề video che mất màn hình khi ở kích thước siêu nhỏ.
-2. **Kẹp tỉ lệ khung hình (Aspect Ratio Clamping):** Android chỉ chấp nhận tỉ lệ PiP trong khoảng $1:2.39$ đến $2.39:1$. `clampedPipAspectRatio()` trong `MainActivity.kt` đảm bảo không bao giờ ném `IllegalArgumentException`.
-3. **Android 13/14 SystemUI RemoteAction:** Nút Play/Pause trên khung PiP được kích hoạt bởi tiến trình hệ điều hành (`com.android.systemui`). Do đó, `pipActionReceiver` được đăng ký với cờ `ContextCompat.RECEIVER_EXPORTED`. Nếu dùng `RECEIVER_NOT_EXPORTED`, nút trên PiP sẽ bị Android 14 chặn hoàn toàn.
-
----
-
-## 4. Kiến Trúc Giữ Âm Thanh Nền (Background Playback)
-
-Khi điện thoại tắt màn hình, Android thường đưa CPU vào trạng thái ngủ sâu (Deep Sleep) và Chromium engine sẽ tạm ngừng render cũng như các bộ đếm thời gian. YouTube Lite giải quyết vấn đề này qua mô hình 2 lớp:
-
-1. **Lớp Giao Diện (`KeepAliveWebView.kt`):**
-   - Override `dispatchWindowVisibilityChanged` và `onWindowVisibilityChanged` để luôn truyền `View.VISIBLE`.
-   - Chromium tin rằng cửa sổ vẫn hiển thị đầy đủ trên màn hình, do đó không ngắt audio pipeline.
-2. **Lớp Dịch Vụ Hệ Thống (`MediaService.kt`):**
-   - Khi `MainActivity.onStop()` được gọi mà `isVideoPlaying == true`, `MediaService` được khởi chạy với cờ `startForegroundService()`.
-   - Dịch vụ duy trì `PowerManager.PARTIAL_WAKE_LOCK` (tối đa 2 giờ).
-   - Khởi tạo Notification với `FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK` theo chuẩn Android 14.
-   - Khi người dùng bật lại ứng dụng (`onStart()`), `MediaService` được giải phóng ngay lập tức (`stopMediaService()`) để tiết kiệm năng lượng.
+`WebResourceCacheManager` hoạt động song song với `AdBlockEngine` tại `shouldInterceptRequest`:
+- Nhận diện các tài nguyên tĩnh: JavaScript bundles (`desktop_polymer_v2*.js`, `mweb_*.js`), CSS, Web Fonts (`roboto*.woff2`), SVG Icons.
+- Lưu trữ cục bộ trong thư mục `cache/web_static/` của ứng dụng với mã băm MD5 làm định danh khóa.
+- Khi trang yêu cầu lại, trả về dữ liệu từ bộ nhớ đệm cục bộ với mã trạng thái HTTP 200, loại bỏ hoàn toàn độ trễ mạng và tiết kiệm tối đa băng thông 4G/5G.

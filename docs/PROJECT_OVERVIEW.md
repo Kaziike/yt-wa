@@ -2,7 +2,7 @@
 
 ## 1. Giới Thiệu Dự Án
 
-**YouTube Lite** là ứng dụng Android chuyên dụng mang lại trải nghiệm xem YouTube siêu nhẹ, mượt mà và hoàn toàn không bị làm phiền bởi quảng cáo. Thay vì dựa vào ứng dụng chính thức cồng kềnh (thường tiêu tốn 400MB - 800MB RAM) hoặc các bản mod phức tạp, YouTube Lite sử dụng công nghệ Android WebView phần cứng kết hợp với **Kiến trúc Brave Shields 3 tầng** để tái lập trải nghiệm duyệt web an toàn, tiết kiệm tài nguyên và bảo vệ quyền riêng tư.
+**YouTube Lite** là ứng dụng Android chuyên dụng mang lại trải nghiệm xem YouTube siêu nhẹ, mượt mà và hoàn toàn không bị làm phiền bởi quảng cáo. Thay vì dựa vào ứng dụng chính thức cồng kềnh (thường tiêu tốn 400MB - 1GB RAM) hoặc các bản mod phức tạp, YouTube Lite sử dụng công nghệ Android WebView phần cứng kết hợp với **Kiến trúc Brave Shields 3 tầng** và kiến trúc **Native In-App MiniPlayer 2 tầng** để tái lập trải nghiệm duyệt web an toàn, tiết kiệm tài nguyên và bảo vệ quyền riêng tư.
 
 ### Mục Tiêu Cốt Lõi
 1. **Siêu nhẹ (Ultra Lightweight):** Mức chiếm dụng RAM chỉ duy trì khoảng ~100MB - 140MB trong suốt phiên xem.
@@ -11,9 +11,13 @@
    - Vô hiệu hóa quảng cáo ghép luồng (SSAI - Server-Side Ad Insertion) bằng cơ chế tua tốc độ 16x + Mute + Auto-skip chỉ trong ~0.2s.
    - Làm sạch giao diện (Cosmetic Filtering) loại bỏ toàn bộ banner tài trợ và hộp thoại nhắc "Mở trong ứng dụng YouTube".
 3. **Trải nghiệm Native cao cấp:**
-   - **Picture-in-Picture (PiP) phần cứng:** Cửa sổ nổi tự động thích ứng với tỉ lệ thật của video (16:9, 4:3, dọc 9:16) mà không bị viền đen thừa hay lỗi giật hình.
+   - **In-App MiniPlayer 2 Tầng (Sliding Sheet):** Cho phép xem video thu nhỏ ở đáy màn hình trong khi vẫn duyệt trang chủ, tìm kiếm, kênh đăng ký bên dưới mà không bị tải lại trang.
+   - **Hệ thống điều khiển MediaSession toàn diện:** Điều khiển phát, tạm dừng, chuyển bài, tua thời gian thực trên Màn hình khóa (Lockscreen), Thanh thông báo (Notification Shade), Tai nghe Bluetooth và Smartwatch.
+   - **Picture-in-Picture (PiP) phần cứng:** Cửa sổ nổi tự động thích ứng với tỉ lệ thật của video (16:9, 4:3, dọc 9:16) kết hợp cơ chế Micro-Seek bảo vệ phát liên tục, không bị kẹt nút play/pause.
    - **Phát âm thanh trong nền (Background Audio):** Giữ âm thanh liên tục khi khóa màn hình hoặc chuyển ứng dụng khác thông qua Foreground Service và cơ chế chống ngắt WebView.
-   - **Tự động xoay toàn màn hình:** Hỗ trợ xoay ngang tự động khi người dùng nhấn nút toàn màn hình của trình phát.
+   - **Kéo để làm mới (Swipe-to-Refresh):** Dễ dàng kéo từ trên xuống để reload bảng tin trang chủ.
+   - **Menu Cài đặt Native BottomSheet:** Tích hợp tùy biến AdBlock, Background Play, Auto PiP, Cache tĩnh ngay trong mục Cài đặt của YouTube (`m.youtube.com/select_site`).
+   - **Tối ưu hóa tài nguyên tĩnh (Static Preload Cache):** Lưu trữ cục bộ các script, font, icon tĩnh giúp giảm tối đa thời gian tải trang lặp lại.
 
 ---
 
@@ -38,9 +42,10 @@ Dự án được tinh gọn tối đa, chỉ phụ thuộc vào các thư việ
 | :--- | :--- | :--- |
 | `androidx.core:core-ktx` | `1.12.0` | Cung cấp extension Kotlin cho Android Core APIs và backward compatibility. |
 | `androidx.appcompat:appcompat` | `1.6.1` | Hỗ trợ Activity hiện đại (`AppCompatActivity`), theme tương thích từ API 26. |
-| `com.google.android.material:material` | `1.11.0` | Cung cấp theme nền tảng (`Theme.MaterialComponents.DayNight.NoActionBar`). |
+| `com.google.android.material:material` | `1.11.0` | Cung cấp BottomSheetDialog, MaterialButton, SwitchMaterial cho menu Cài đặt Native. |
+| `androidx.swiperefreshlayout:swiperefreshlayout` | `1.1.0` | Cung cấp cử chỉ kéo từ trên xuống để làm mới trang (Swipe-to-Refresh). |
 | `androidx.constraintlayout:constraintlayout` | `2.1.4` | Tùy chọn bố cục linh hoạt khi mở rộng giao diện. |
-| `androidx.media:media` | `1.7.0` | Quản lý `MediaSessionCompat` và notification điều khiển media hệ thống. |
+| `androidx.media:media` | `1.7.0` | Quản lý `MediaSessionCompat` và notification điều khiển media hệ thống (`NotificationCompat.MediaStyle`). |
 | `androidx.webkit:webkit` | `1.10.0` | **Thành phần cốt lõi:** Cho phép sử dụng `WebViewCompat.addDocumentStartJavaScript` để tiêm Scriptlet tại `DOCUMENT_START`. |
 
 ---
@@ -60,30 +65,21 @@ Yêu cầu máy tính đã cài đặt JDK 17 và cấu hình biến môi trư�
 .\gradlew.bat assembleDebug
 
 # Dành cho macOS/Linux:
+chmod +x ./gradlew
 ./gradlew assembleDebug
 ```
 File APK đầu ra sẽ nằm tại:
 `app/build/outputs/apk/debug/app-debug.apk`
 
 ### Cách 3: Mở bằng Android Studio
-Mở thư mục gốc dự án bằng Android Studio Iguana / Jellyfish (hoặc mới hơn), đồng bộ Gradle (Sync Project with Gradle Files) và bấm nút **Run** (`Shift + F10`).
+Mở thư mục gốc dự án bằng Android Studio, đồng bộ Gradle (Sync Project with Gradle Files) và bấm nút **Run** (`Shift + F10`).
 
 ---
 
 ## 4. Trạng Thái Hiện Tại Của Dự Án
 
-- **Nhánh hoạt động chính:** `main` (commit hiện tại: `c6f70be`).
-- **Trạng thái mã nguồn:** Mã nguồn hoàn chỉnh, sạch, tuân thủ kiến trúc phân tách rõ ràng giữa Native Kotlin và Web Engine Scriptlets.
+- **Nhánh hoạt động chính:** `main`.
+- **Trạng thái mã nguồn:** Mã nguồn hoàn chỉnh, kiến trúc phân tách rõ ràng giữa 2 tầng Native View (Browse View & Player View), tích hợp đầy đủ hệ sinh thái MediaSession, Static Cache và Brave Shields.
 - **Trạng thái kiểm thử:**
-  - Build Debug APK thành công trên CI và máy trạm.
-  - Các tính năng PiP, Auto-Skip SSAI, Document-Start injection, Background Service đã được tích hợp và xác minh.
-
----
-
-## 5. Giới Hạn & Ghi Chú Kỹ Thuật
-
-1. **Thư mục `adblock-rust/`:**
-   - Trong thư mục gốc có chứa mã nguồn của thư viện Rust `adblock-rust`.
-   - **Xác minh thực tế:** Hiện tại `app/build.gradle.kts` và `settings.gradle.kts` **không** liên kết (link) hay biên dịch thư mục này vào APK thông qua NDK/JNI. Ứng dụng đang sử dụng bộ lọc native viết bằng Kotlin thuần (`AdBlockEngine.kt`). Module Rust này được lưu trữ như một thành phần nghiên cứu hoặc chuẩn bị cho các đợt tích hợp chuyên sâu trong tương lai.
-2. **Phụ thuộc vào DOM của YouTube:**
-   - Scriptlet `youtube_defuser.js` và `pip_controller.js` dựa trên một số class và thuộc tính DOM của `m.youtube.com`. Khi YouTube cập nhật lớn cấu trúc HTML/CSS, các selector này cần được kiểm tra và cập nhật định kỳ.
+  - Build Debug APK thành công 100% trên CI GitHub Actions.
+  - Các tính năng In-App MiniPlayer, MediaSession Lockscreen/Notification, PiP Micro-Seek, Auto-Skip SSAI, Document-Start injection, Static Cache đã được xác minh hoạt động mượt mà.
