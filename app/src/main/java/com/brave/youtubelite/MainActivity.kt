@@ -12,6 +12,7 @@ import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Color
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
@@ -27,14 +28,13 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.FrameLayout
-import android.widget.ImageButton
-import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.brave.youtubelite.network.AdBlockEngine
 import com.brave.youtubelite.network.AppWebViewClient
 import com.brave.youtubelite.network.WebResourceCacheManager
@@ -60,15 +60,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: KeepAliveWebView
     private lateinit var progressBar: ProgressBar
     private lateinit var customViewContainer: FrameLayout
-    private lateinit var floatingActionContainer: LinearLayout
-    private lateinit var btnReload: ImageButton
-    private lateinit var btnSettings: ImageButton
+    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
 
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var isFullscreen = false
 
     private var isVideoPlaying = false
+    private var isMiniPlayerActive = false
     private var currentTitle = "YouTube Lite"
     private var currentChannel = ""
     private var positionMs: Long = 0L
@@ -134,16 +133,15 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webView)
         progressBar = findViewById(R.id.progressBar)
         customViewContainer = findViewById(R.id.customViewContainer)
-        floatingActionContainer = findViewById(R.id.floatingActionContainer)
-        btnReload = findViewById(R.id.btnReload)
-        btnSettings = findViewById(R.id.btnSettings)
+        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout)
 
-        btnReload.setOnClickListener {
+        swipeRefreshLayout.setProgressBackgroundColorSchemeColor(Color.parseColor("#212121"))
+        swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#FF0000"), Color.parseColor("#FF5722"))
+        swipeRefreshLayout.setOnRefreshListener {
             webView.reload()
         }
-
-        btnSettings.setOnClickListener {
-            showSettingsDialog()
+        swipeRefreshLayout.setOnChildScrollUpCallback { _, _ ->
+            webView.scrollY > 0
         }
 
         setupWebView()
@@ -203,6 +201,16 @@ class MainActivity : AppCompatActivity() {
 
         webView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
         val appWebViewClient = AppWebViewClient(applicationContext)
+        appWebViewClient.onOpenSettings = {
+            runOnUiThread {
+                showSettingsDialog()
+            }
+        }
+        appWebViewClient.onPageFinishedCallback = {
+            runOnUiThread {
+                swipeRefreshLayout.isRefreshing = false
+            }
+        }
         appWebViewClient.installDocumentStartScripts(webView)
         webView.webViewClient = appWebViewClient
 
@@ -220,60 +228,102 @@ class MainActivity : AppCompatActivity() {
                     progressBar.progress = newProgress
                 } else {
                     progressBar.visibility = View.GONE
+                    swipeRefreshLayout.isRefreshing = false
                 }
             }
 
             override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                if (customView != null) {
-                    onHideCustomView()
-                    return
-                }
-
-                customView = view
-                customViewCallback = callback
-                isFullscreen = true
-
-                webView.visibility = View.GONE
-                floatingActionContainer.visibility = View.GONE
-                customViewContainer.visibility = View.VISIBLE
-                customViewContainer.addView(
-                    view,
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                )
-
-                window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                updatePipParams()
+                enterFullscreen(view, callback)
             }
 
             override fun onHideCustomView() {
-                if (customView == null) return
-
-                isFullscreen = false
-                customViewContainer.removeView(customView)
-                customView = null
-                customViewCallback?.onCustomViewHidden()
-
-                customViewContainer.visibility = View.GONE
-                webView.visibility = View.VISIBLE
-                floatingActionContainer.visibility = View.VISIBLE
-
-                window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                updatePipParams()
+                exitFullscreen()
             }
         }
+    }
+
+    private fun enterFullscreen(view: View?, callback: WebChromeClient.CustomViewCallback?) {
+        if (customView != null) {
+            exitFullscreen()
+            return
+        }
+
+        customView = view
+        customViewCallback = callback
+        isFullscreen = true
+        swipeRefreshLayout.isEnabled = false
+
+        webView.visibility = View.GONE
+        customViewContainer.visibility = View.VISIBLE
+        customViewContainer.addView(
+            view,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        updatePipParams()
+    }
+
+    private fun exitFullscreen() {
+        if (customView == null) return
+
+        isFullscreen = false
+        customViewContainer.removeView(customView)
+        customView = null
+        customViewCallback?.onCustomViewHidden()
+
+        customViewContainer.visibility = View.GONE
+        webView.visibility = View.VISIBLE
+        if (!isInPipModeCompat()) {
+            swipeRefreshLayout.isEnabled = true
+        }
+
+        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        updatePipParams()
     }
 
     private fun setupBackPressedHandler() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (isFullscreen) {
-                    webView.webChromeClient?.onHideCustomView()
-                } else if (webView.canGoBack()) {
+                    exitFullscreen()
+                    return
+                }
+
+                val currentUrl = webView.url ?: ""
+                val isWatchPage = currentUrl.contains("/watch")
+
+                // 1. Nếu video đang phát hoặc đang ở URL /watch và chưa minimize:
+                // gọi window.__braveMiniPlayer.minimize() để thu nhỏ về MiniPlayer trước khi thoát trang/app!
+                if (!isMiniPlayerActive && (isVideoPlaying || isWatchPage)) {
+                    webView.evaluateJavascript(
+                        "(function(){ if (window.__braveMiniPlayer && typeof window.__braveMiniPlayer.minimize === 'function') { return window.__braveMiniPlayer.minimize(); } return 'none'; })();"
+                    ) { result ->
+                        Log.d(TAG, "Back pressed -> minimize result: $result")
+                    }
+                    return
+                }
+
+                // 2. Nếu MiniPlayer đang mở và người dùng ấn Back: cho phép back trang lịch sử web hoặc đóng MiniPlayer.
+                if (isMiniPlayerActive) {
+                    if (webView.canGoBack()) {
+                        webView.goBack()
+                    } else {
+                        webView.evaluateJavascript(
+                            "(function(){ if (window.__braveMiniPlayer && typeof window.__braveMiniPlayer.close === 'function') { window.__braveMiniPlayer.close(); } })();",
+                            null
+                        )
+                    }
+                    return
+                }
+
+                // 3. Xử lý mặc định
+                if (webView.canGoBack()) {
                     webView.goBack()
                 } else {
                     isEnabled = false
@@ -448,12 +498,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun enterPipLayout() {
         progressBar.visibility = View.GONE
-        floatingActionContainer.visibility = View.GONE
+        swipeRefreshLayout.isEnabled = false
         runPipCommand("enter")
     }
 
     private fun exitPipLayout() {
-        floatingActionContainer.visibility = if (isFullscreen) View.GONE else View.VISIBLE
+        if (!isFullscreen) {
+            swipeRefreshLayout.isEnabled = true
+        }
         runPipCommand("exit")
     }
 
@@ -494,12 +546,16 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         if (isInPictureInPictureMode) {
+            swipeRefreshLayout.isEnabled = false
             enterPipLayout()
             webView.postDelayed({ if (isInPipModeCompat()) enterPipLayout() }, 150)
             webView.postDelayed({ if (isInPipModeCompat()) enterPipLayout() }, 450)
             updatePipParams()
         } else {
             exitPipLayout()
+            if (!isFullscreen) {
+                swipeRefreshLayout.isEnabled = true
+            }
         }
     }
 
@@ -510,6 +566,9 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         if (!isInPipModeCompat()) {
             exitPipLayout()
+            if (!isFullscreen) {
+                swipeRefreshLayout.isEnabled = true
+            }
             runPipCommand("setBackground(false)")
         }
     }
@@ -590,6 +649,13 @@ class MainActivity : AppCompatActivity() {
 
     inner class MediaBridge {
         @JavascriptInterface
+        fun openSettings() {
+            runOnUiThread {
+                showSettingsDialog()
+            }
+        }
+
+        @JavascriptInterface
         fun onVideoPlaying(title: String, channel: String) {
             runOnUiThread {
                 isVideoPlaying = true
@@ -619,6 +685,14 @@ class MainActivity : AppCompatActivity() {
                 if (durMs > 0) durationMs = durMs
                 updatePipParams()
                 updateMediaService()
+            }
+        }
+
+        @JavascriptInterface
+        fun onMiniPlayerStateChanged(isMinimized: Boolean) {
+            runOnUiThread {
+                isMiniPlayerActive = isMinimized
+                Log.d(TAG, "onMiniPlayerStateChanged: isMinimized=$isMinimized")
             }
         }
 

@@ -194,8 +194,29 @@
         return currentVideo ? 'pip:on' : 'pip:on(no-video)';
     }
 
+    function triggerMicroSeek() {
+        try {
+            var v = mainVideo();
+            if (v && isFinite(v.currentTime)) {
+                // Micro-seek không làm gián đoạn phát (gán lại currentTime để kích hoạt pipeline re-render của YouTube)
+                var cur = v.currentTime;
+                v.currentTime = cur;
+                // Bắn sự kiện seeking và seeked để đánh thức bộ re-render của YouTube Player
+                v.dispatchEvent(new Event('seeking'));
+                v.dispatchEvent(new Event('seeked'));
+                v.dispatchEvent(new Event('timeupdate'));
+            }
+        } catch (e) {}
+        try {
+            var player = getPlayer();
+            if (player) {
+                if (typeof player.wakeUpControls === 'function') player.wakeUpControls();
+                if (typeof player.updateDimensions === 'function') player.updateDimensions();
+            }
+        } catch (e2) {}
+    }
+
     function stopLoop() {
-        window.__bravePipTransitionUntil = Date.now() + 1000;
         active = false;
         currentVideo = null;
         if (timer) {
@@ -208,20 +229,25 @@
         clearMarks();
         removeStyle();
 
-        // Reset các cờ khoá pause để khi mở full ứng dụng nút Play/Pause trên giao diện web hoạt động tự nhiên
+        // Reset sạch các biến cờ bảo vệ để khi mở full ứng dụng nút Play/Pause trên giao diện web hoạt động 100% tự nhiên
+        window.__braveProtectPlayUntil = 0;
+        window.__bravePlayPendingUntil = 0;
+        window.__bravePipTransitionUntil = 0;
         window.__braveUserPaused = false;
         window.__isUserExplicitPause = false;
         window.__braveAllowPauseUntil = 0;
 
-        var v = mainVideo();
-        if (v && !v.paused && !v.ended) {
-            window.__braveProtectPlayUntil = Date.now() + 1200;
-        }
+        // Triển khai Micro-Seek Re-render Kick: đánh thức bộ re-render của YouTube Player ngay khi gỡ PiP
+        triggerMicroSeek();
 
-        // Báo resize nhiều nhịp để YouTube tính lại khung player sau khi hiệu ứng mở rộng cửa sổ kết thúc
-        [0, 150, 350].forEach(function(delay) {
+        // Dispatch chuỗi sự kiện resize và orientationchange sau [0, 80, 200, 450]ms
+        [0, 80, 200, 450].forEach(function(delay) {
             setTimeout(function() {
                 try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+                try { window.dispatchEvent(new Event('orientationchange')); } catch (e) {}
+                if (delay === 80 || delay === 200) {
+                    triggerMicroSeek();
+                }
             }, delay);
         });
         notifyMediaState();
@@ -464,10 +490,20 @@
                 window.__braveProtectPlayUntil = Date.now() + 1500;
             }
         } else if (!bg && !active) {
-            // Khi quay lại foreground full-app, mở khoá hoàn toàn các cờ pause
+            // Khi quay lại foreground full-app, mở khoá hoàn toàn các cờ pause và kick re-render
+            window.__braveProtectPlayUntil = 0;
+            window.__bravePlayPendingUntil = 0;
+            window.__bravePipTransitionUntil = 0;
             window.__braveUserPaused = false;
             window.__isUserExplicitPause = false;
             window.__braveAllowPauseUntil = 0;
+            triggerMicroSeek();
+            [0, 80, 200, 450].forEach(function(delay) {
+                setTimeout(function() {
+                    try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+                    try { window.dispatchEvent(new Event('orientationchange')); } catch (e) {}
+                }, delay);
+            });
         }
         return bg ? 'bg:on' : 'bg:off';
     }
@@ -491,6 +527,7 @@
         setBackground: setBackground,
         applySettings: applySettings,
         mainVideo: mainVideo,
+        triggerMicroSeek: triggerMicroSeek,
         isActive: function() { return active; }
     };
 
@@ -498,4 +535,5 @@
     window.__enterPipMode = enter;
     window.__exitPipMode = exit;
     window.__braveMainVideo = mainVideo;
+    window.__braveMicroSeek = triggerMicroSeek;
 })();

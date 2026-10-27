@@ -142,16 +142,22 @@
     // ==============================================================
     // 3. DUY TRÌ ÂM THANH KHI TẮT MÀN HÌNH & CHỐNG TỰ DỪNG KHI THU NHỎ (PLAYER_VIEW_TOO_SMALL)
     // ==============================================================
+    function isPipOrMiniActive() {
+        const isPip = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
+        const isMini = !!(window.__braveMiniPlayer && typeof window.__braveMiniPlayer.isMinimized === 'function' && window.__braveMiniPlayer.isMinimized());
+        return isPip || isMini;
+    }
+
     ['visibilitychange', 'webkitvisibilitychange', 'pagehide'].forEach(eventType => {
         window.addEventListener(eventType, function(e) {
-            const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
-            if (isBgPlayEnabled() || isPipMode) {
+            const isPipOrMini = isPipOrMiniActive();
+            if (isBgPlayEnabled() || isPipOrMini) {
                 e.stopImmediatePropagation();
             }
         }, true);
         document.addEventListener(eventType, function(e) {
-            const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
-            if (isBgPlayEnabled() || isPipMode) {
+            const isPipOrMini = isPipOrMiniActive();
+            if (isBgPlayEnabled() || isPipOrMini) {
                 e.stopImmediatePropagation();
             }
         }, true);
@@ -160,16 +166,16 @@
     try {
         Object.defineProperty(document, 'hidden', {
             get: function() {
-                const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
-                if (isBgPlayEnabled() || isPipMode) return false;
+                const isPipOrMini = isPipOrMiniActive();
+                if (isBgPlayEnabled() || isPipOrMini) return false;
                 return !!window.__braveAppInBackground;
             },
             configurable: true
         });
         Object.defineProperty(document, 'visibilityState', {
             get: function() {
-                const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
-                if (isBgPlayEnabled() || isPipMode) return 'visible';
+                const isPipOrMini = isPipOrMiniActive();
+                if (isBgPlayEnabled() || isPipOrMini) return 'visible';
                 return window.__braveAppInBackground ? 'hidden' : 'visible';
             },
             configurable: true
@@ -183,63 +189,225 @@
     window.__isUserExplicitPause = false;
     window.__braveAllowPauseUntil = 0;
 
-    window.addEventListener('pointerdown', function(e) {
-        if (e.target && e.target.closest && e.target.closest(
-            '.ytp-play-button, .player-control-play-pause-icon, #player-control-overlay button, ' +
-            'button[aria-label*="Pause" i], button[aria-label*="Tạm dừng" i], ' +
-            '[aria-label*="Pause" i], [aria-label*="Tạm dừng" i]'
-        )) {
-            window.__isUserExplicitPause = true;
-            setTimeout(() => { window.__isUserExplicitPause = false; }, 800);
-        }
-    }, true);
-
     if (!window.__braveNativePlay && window.HTMLMediaElement) {
         window.__braveNativePlay = HTMLMediaElement.prototype.play;
     }
+    if (!window.__braveNativePause && window.HTMLMediaElement) {
+        window.__braveNativePause = HTMLMediaElement.prototype.pause;
+    }
+    const nativeMediaPlay = window.__braveNativePlay || HTMLMediaElement.prototype.play;
     const nativeMediaPause = window.__braveNativePause || HTMLMediaElement.prototype.pause;
-    window.__braveNativePause = nativeMediaPause;
 
-    HTMLMediaElement.prototype.pause = function() {
-        // 1. Nếu người dùng chủ động bấm Pause từ PiP / Notification -> cho phép ngay
-        if (window.__braveUserPaused === true) {
-            return nativeMediaPause.apply(this, arguments);
+    // ==============================================================
+    // 3.5. RE-RENDER KICK & TAP FALLBACK INTERCEPTOR CHO PLAYER CONTROLS
+    // Giải quyết triệt để lỗi nút Play/Pause bị đơ / kẹt layer khi mở từ PiP ra full app
+    // ==============================================================
+    function kickPlayerReRender() {
+        try {
+            const video = pickMainVideo() || document.querySelector('video');
+            if (video && isFinite(video.currentTime)) {
+                const cur = video.currentTime;
+                video.currentTime = cur;
+                video.dispatchEvent(new Event('seeking'));
+                video.dispatchEvent(new Event('seeked'));
+                video.dispatchEvent(new Event('timeupdate'));
+            }
+        } catch (e) {}
+        try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+        try { window.dispatchEvent(new Event('orientationchange')); } catch (e) {}
+    }
+    window.__braveKickReRender = kickPlayerReRender;
+
+    // Đánh thức controls re-render khi app focus hoặc tab hiển thị trở lại
+    window.addEventListener('focus', function() {
+        const isPip = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
+        if (!isPip && !window.__braveAppInBackground) {
+            setTimeout(kickPlayerReRender, 100);
+            setTimeout(kickPlayerReRender, 350);
+        }
+    }, true);
+
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) {
+            const isPip = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
+            if (!isPip && !window.__braveAppInBackground) {
+                setTimeout(kickPlayerReRender, 100);
+                setTimeout(kickPlayerReRender, 350);
+            }
+        }
+    }, true);
+
+    function isPlayPauseElement(target) {
+        if (!target || !target.closest) return false;
+
+        // Bỏ qua nếu chạm vào các nút điều hướng / tính năng khác
+        if (target.closest(
+            '.player-control-next-icon, .player-control-previous-icon, ' +
+            '.ytp-next-button, .ytp-prev-button, ' +
+            'button[aria-label*="Next" i], button[aria-label*="Previous" i], ' +
+            'button[aria-label*="Tiếp theo" i], button[aria-label*="Trước" i], ' +
+            'button[aria-label*="Tiếp" i], ' +
+            '[class*="seek"], [class*="progress"], [class*="slider"], ' +
+            '[class*="settings"], [class*="subtitle"], [class*="caption"]'
+        )) {
+            return false;
         }
 
-        // 2. Nếu vừa bấm Play từ PiP / Notification -> CHẶN TUYỆT ĐỐI mọi lệnh auto-pause của YouTube
-        if (window.__braveProtectPlayUntil && Date.now() < window.__braveProtectPlayUntil) {
-            console.log('[BraveShield] Đã chặn lệnh auto-pause trong thời gian bảo vệ Play!');
-            return;
+        // Nhận diện các selector nút Play/Pause phổ biến của YouTube Mobile Web & Desktop
+        if (target.closest(
+            '.player-control-play-pause-icon, .ytp-play-button, ' +
+            'button[aria-label*="Pause" i], button[aria-label*="Play" i], ' +
+            'button[aria-label*="Tạm dừng" i], button[aria-label*="Phát" i], ' +
+            '[aria-label*="Pause" i], [aria-label*="Play" i], ' +
+            '[aria-label*="Tạm dừng" i], [aria-label*="Phát" i], ' +
+            '[class*="play-pause-icon"], [class*="play-pause-button"], ' +
+            '[data-action="play-pause"]'
+        )) {
+            return true;
+        }
+
+        // Nếu chạm trực tiếp vào container giữa (.player-controls-middle)
+        const middle = target.closest('.player-controls-middle');
+        if (middle) {
+            const rect = middle.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    let fallbackCheckTimer = null;
+    let lastFallbackTapTime = 0;
+
+    function setupPlayPauseFallback() {
+        function handleControlsTap(e) {
+            try {
+                const target = e.target;
+                if (!isPlayPauseElement(target)) return;
+
+                const now = Date.now();
+                // Bỏ qua nếu là sự kiện lặp lại trong chuỗi pointerdown -> touchend -> click (trong vòng 300ms)
+                if (now - lastFallbackTapTime < 300) {
+                    return;
+                }
+                lastFallbackTapTime = now;
+
+                const video = pickMainVideo() || document.querySelector('video');
+                if (!video) return;
+
+                const wasPaused = video.paused;
+
+                // Đánh dấu người dùng đang chủ động thao tác nút controls
+                window.__isUserExplicitPause = true;
+                window.__braveAllowPauseUntil = Date.now() + 1000;
+                if (!wasPaused) {
+                    // Người dùng muốn pause: gỡ bỏ ngay cờ bảo vệ play
+                    window.__braveProtectPlayUntil = 0;
+                    window.__bravePlayPendingUntil = 0;
+                }
+
+                if (fallbackCheckTimer) {
+                    clearTimeout(fallbackCheckTimer);
+                    fallbackCheckTimer = null;
+                }
+
+                // Cho phép sự kiện truyền tự nhiên đến YouTube Player Core.
+                // Sau 120ms kiểm tra lại: Nếu video.paused === wasPaused (YouTube bị kẹt layer / không xử lý):
+                // Tự động can thiệp gọi trực tiếp play/pause native và kick re-render!
+                fallbackCheckTimer = setTimeout(function() {
+                    fallbackCheckTimer = null;
+                    try {
+                        const curVideo = pickMainVideo() || video;
+                        if (!curVideo) return;
+
+                        if (curVideo.paused === wasPaused) {
+                            console.log('[BraveShield] Phát hiện nút controls bị kẹt layer! Kích hoạt Tap Fallback Interceptor ->', wasPaused ? 'Play' : 'Pause');
+
+                            if (wasPaused) {
+                                // Đang dừng -> Chuyển sang Phát
+                                window.__braveUserPaused = false;
+                                window.__braveProtectPlayUntil = Date.now() + 1500;
+                                const playFn = window.__braveNativePlay || curVideo.play;
+                                if (playFn) {
+                                    try {
+                                        const r = playFn.call(curVideo);
+                                        if (r && typeof r.catch === 'function') r.catch(function() {});
+                                    } catch (errPlay) {}
+                                }
+                                try { curVideo.dispatchEvent(new Event('play')); } catch (e1) {}
+                                try { curVideo.dispatchEvent(new Event('playing')); } catch (e2) {}
+                            } else {
+                                // Đang phát -> Chuyển sang Tạm dừng
+                                window.__braveUserPaused = true;
+                                window.__braveProtectPlayUntil = 0;
+                                window.__braveAllowPauseUntil = Date.now() + 1000;
+                                const pauseFn = window.__braveNativePause || curVideo.pause;
+                                if (pauseFn) {
+                                    try { pauseFn.call(curVideo); } catch (errPause) {}
+                                }
+                                try { curVideo.dispatchEvent(new Event('pause')); } catch (e3) {}
+                            }
+
+                            // Đánh thức pipeline re-render của YouTube Player
+                            kickPlayerReRender();
+
+                            syncNativeState();
+                        }
+                    } catch (errFallback) {
+                        console.error('[BraveShield] Tap fallback error:', errFallback);
+                    }
+                }, 120);
+            } catch (errMain) {}
+        }
+
+        // Lắng nghe ở capture phase (true)
+        ['pointerdown', 'touchend', 'click'].forEach(function(eventType) {
+            window.addEventListener(eventType, handleControlsTap, true);
+        });
+    }
+
+    setupPlayPauseFallback();
+
+    HTMLMediaElement.prototype.pause = function() {
+        // 1. Thao tác chủ động từ người dùng (nút PiP, Notification, hoặc tap vào player controls):
+        // Luôn cho phép pause 100%, không bị bất kỳ cờ bảo vệ nào chặn
+        if (window.__braveUserPaused === true ||
+            window.__isUserExplicitPause === true ||
+            (window.__braveAllowPauseUntil && Date.now() < window.__braveAllowPauseUntil)) {
+            window.__isUserExplicitPause = false;
+            window.__braveProtectPlayUntil = 0;
+            return nativeMediaPause.apply(this, arguments);
         }
 
         const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
-        const isPipTransition = !!(window.__bravePipTransitionUntil && Date.now() < window.__bravePipTransitionUntil);
+        const isMiniPlayer = !!(window.__braveMiniPlayer && typeof window.__braveMiniPlayer.isMinimized === 'function' && window.__braveMiniPlayer.isMinimized());
         const isBackground = !!window.__braveAppInBackground;
         const bgPlayEnabled = isBgPlayEnabled();
 
-        // 3. KHI ĐANG MỞ FULL ỨNG DỤNG BÌNH THƯỜNG TRÊN MÀN HÌNH:
-        // Luôn cho phép nativeMediaPause để mọi nút Play/Pause trên giao diện web hoạt động tự nhiên 100%, không bao giờ bị khóa!
-        if (!isPipMode && !isPipTransition && !isBackground) {
+        // 2. KHI ĐANG MỞ FULL ỨNG DỤNG BÌNH THƯỜNG TRÊN MÀN HÌNH (!isPipMode && !isBackground && !isMiniPlayer):
+        // Mọi lệnh pause phải được thông qua nativeMediaPause 100% tự nhiên, KHÔNG bị chặn bởi bất kỳ cờ thời gian nào!
+        if (!isPipMode && !isBackground && !isMiniPlayer) {
+            if (window.__braveProtectPlayUntil && Date.now() < window.__braveProtectPlayUntil) {
+                console.log('[BraveShield] Đã chặn lệnh auto-pause trong thời gian bảo vệ Play!');
+                return;
+            }
             return nativeMediaPause.apply(this, arguments);
         }
 
-        // Nếu đang ở dưới nền nhưng người dùng đã tắt tính năng phát trong nền (và không ở chế độ PiP)
-        if (isBackground && !isPipMode && !isPipTransition && !bgPlayEnabled) {
+        // 3. Nếu đang ở dưới nền nhưng người dùng đã tắt tính năng phát trong nền (và không ở chế độ PiP)
+        if (isBackground && !isPipMode && !bgPlayEnabled) {
             return nativeMediaPause.apply(this, arguments);
         }
 
-        // 4. Khi đang ở PiP, đang chuyển tiếp PiP, hoặc chạy nền (với bgPlayEnabled):
-        // Chỉ cho phép pause nếu có cờ chủ động từ người dùng
-        if (window.__braveAllowPauseUntil && Date.now() < window.__braveAllowPauseUntil) {
-            window.__isUserExplicitPause = false;
-            return nativeMediaPause.apply(this, arguments);
-        }
-        if (window.__isUserExplicitPause) {
-            window.__isUserExplicitPause = false;
-            return nativeMediaPause.apply(this, arguments);
+        // 4. Nếu vừa bấm Play từ PiP / Notification -> CHẶN TUYỆT ĐỐI mọi lệnh auto-pause của YouTube khi ở PiP hoặc chạy nền
+        if (window.__braveProtectPlayUntil && Date.now() < window.__braveProtectPlayUntil) {
+            console.log('[BraveShield] Đã chặn lệnh auto-pause trong thời gian bảo vệ Play (PiP/Background)!');
+            return;
         }
 
-        // Bỏ qua tất cả các lệnh pause do YouTube tự gọi khi thu nhỏ PiP hoặc tắt màn hình!
+        // 5. Bỏ qua tất cả các lệnh pause do YouTube tự gọi khi thu nhỏ PiP hoặc tắt màn hình!
         console.log('[BraveShield] Đã chặn lệnh tự dừng video do kích thước nhỏ hoặc chạy nền!');
         return;
     };
