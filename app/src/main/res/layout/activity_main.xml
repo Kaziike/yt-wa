@@ -5,7 +5,7 @@
     android:layout_height="match_parent"
     android:background="@color/black">
 
-    <!-- Trình duyệt WebView được bọc trong SwipeRefreshLayout để hỗ trợ kéo làm mới -->
+    <!-- 1. TẦNG DƯỚI: Duyệt Trang chủ, Kênh đăng ký, Tìm kiếm... (Giữ nguyên vị trí cuộn) -->
     <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
         android:id="@+id/swipeRefreshLayout"
         android:layout_width="match_parent"
@@ -17,6 +17,114 @@
             android:layout_height="match_parent" />
 
     </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+    <!-- 2. TẦNG TRÊN: Lớp phát Video trượt đè lên (Sliding Video Player Layer) -->
+    <FrameLayout
+        android:id="@+id/playerPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/black"
+        android:visibility="gone">
+
+        <!-- WebView chuyên dụng phát Video -->
+        <com.brave.youtubelite.view.KeepAliveWebView
+            android:id="@+id/playerWebView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Nút thu nhỏ player (mũi tên chúc xuống) khi xem full video -->
+        <ImageButton
+            android:id="@+id/btnMinimizePlayer"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_gravity="top|start"
+            android:layout_margin="10dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_chevron_down"
+            android:contentDescription="Thu nhỏ"
+            android:tint="@color/white" />
+
+        <!-- Lớp phủ bắt cử chỉ vuốt kéo trên khu vực video khi xem to -->
+        <View
+            android:id="@+id/playerDragArea"
+            android:layout_width="match_parent"
+            android:layout_height="220dp"
+            android:layout_gravity="top"
+            android:background="@android:color/transparent" />
+
+        <!-- Thanh điều khiển MiniPlayer hiển thị ở đáy khi thu nhỏ -->
+        <LinearLayout
+            android:id="@+id/miniPlayerBar"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_gravity="top"
+            android:background="#212121"
+            android:elevation="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp"
+            android:visibility="gone">
+
+            <!-- Khoảng trống nơi video 16:9 thu nhỏ hiển thị -->
+            <View
+                android:layout_width="104dp"
+                android:layout_height="58dp"
+                android:layout_marginEnd="8dp"
+                android:background="@android:color/transparent" />
+
+            <!-- Tiêu đề và tên kênh -->
+            <LinearLayout
+                android:id="@+id/miniPlayerInfoContainer"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvMiniPlayerTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="YouTube Lite"
+                    android:textColor="@color/white"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvMiniPlayerChannel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text=""
+                    android:textColor="#AAAAAA"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <!-- Nút Play/Pause trên MiniPlayer Bar -->
+            <ImageButton
+                android:id="@+id/btnMiniPlayerPlayPause"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Phát/Tạm dừng"
+                android:src="@android:drawable/ic_media_pause"
+                android:tint="@color/white" />
+
+            <!-- Nút Đóng [X] trên MiniPlayer Bar -->
+            <ImageButton
+                android:id="@+id/btnMiniPlayerClose"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Đóng"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:tint="@color/white" />
+
+        </LinearLayout>
+
+    </FrameLayout>
 
     <!-- Thanh tiến trình tải trang siêu mỏng -->
     <ProgressBar
