@@ -1,6 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="black">#FF0F0F0F</color>
     <color name="white">#FFFFFFFF</color>
     <color name="red">#FFFF0000</color>
     <color name="gray">#FF272727</color>
+
+    <!-- YouTube Dark Theme Colors -->
+    <color name="dialog_bg">#FF181818</color>
+    <color name="card_bg">#FF212121</color>
+    <color name="card_stroke">#33FFFFFF</color>
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#FFAAAAAA</color>
+    <color name="divider_color">#26FFFFFF</color>
+
+    <!-- Floating Pill Colors -->
+    <color name="pill_bg">#CC181818</color>
+    <color name="pill_border">#4DFFFFFF</color>
+
+    <!-- Action & Accent Colors -->
+    <color name="red_accent">#FFFF0000</color>
+    <color name="red_accent_hover">#CCFF0000</color>
+    <color name="btn_secondary_bg">#FF2A2A2A</color>
+    <color name="btn_secondary_stroke">#44FFFFFF</color>
 </resources>

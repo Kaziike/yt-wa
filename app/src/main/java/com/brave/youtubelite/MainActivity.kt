@@ -27,15 +27,23 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.brave.youtubelite.network.AdBlockEngine
 import com.brave.youtubelite.network.AppWebViewClient
+import com.brave.youtubelite.network.WebResourceCacheManager
 import com.brave.youtubelite.service.MediaService
+import com.brave.youtubelite.settings.AppSettings
 import com.brave.youtubelite.view.KeepAliveWebView
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.switchmaterial.SwitchMaterial
 
 class MainActivity : AppCompatActivity() {
 
@@ -52,6 +60,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: KeepAliveWebView
     private lateinit var progressBar: ProgressBar
     private lateinit var customViewContainer: FrameLayout
+    private lateinit var floatingActionContainer: LinearLayout
+    private lateinit var btnReload: ImageButton
+    private lateinit var btnSettings: ImageButton
 
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
@@ -60,16 +71,25 @@ class MainActivity : AppCompatActivity() {
     private var isVideoPlaying = false
     private var currentTitle = "YouTube Lite"
     private var currentChannel = ""
+    private var positionMs: Long = 0L
+    private var durationMs: Long = -1L
+    private var isMediaServiceActive = false
 
     // Tỉ lệ khung hình thật của video (cập nhật từ JS) để cửa sổ PiP khớp video
     private var videoAspectRatio = Rational(16, 9)
 
-    // Receiver lắng nghe nút Play và Pause riêng biệt trên PiP
-    private val pipActionReceiver = object : BroadcastReceiver() {
+    // Receiver lắng nghe nút Play/Pause trên PiP và Media Controls từ MediaService / Notification / LockScreen
+    private val mediaActionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                ACTION_PIP_PLAY -> handlePipPlay()
-                ACTION_PIP_PAUSE -> handlePipPause()
+                ACTION_PIP_PLAY, MediaService.ACTION_MEDIA_PLAY -> handlePipPlay()
+                ACTION_PIP_PAUSE, MediaService.ACTION_MEDIA_PAUSE -> handlePipPause()
+                MediaService.ACTION_MEDIA_NEXT -> runPipCommand("next")
+                MediaService.ACTION_MEDIA_PREV -> runPipCommand("previous")
+                MediaService.ACTION_MEDIA_SEEK -> {
+                    val pos = intent.getLongExtra(MediaService.EXTRA_SEEK_POS_MS, 0L)
+                    runPipCommand("seekTo($pos)")
+                }
             }
         }
     }
@@ -79,16 +99,23 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // Đồng bộ cài đặt ban đầu vào Engine
+        AdBlockEngine.isEnabled = AppSettings.isAdBlockEnabled(this)
+        WebResourceCacheManager.isEnabled = AppSettings.isPreloadCacheEnabled(this)
+
         val filter = IntentFilter().apply {
             addAction(ACTION_PIP_PLAY)
             addAction(ACTION_PIP_PAUSE)
+            addAction(MediaService.ACTION_MEDIA_PLAY)
+            addAction(MediaService.ACTION_MEDIA_PAUSE)
+            addAction(MediaService.ACTION_MEDIA_NEXT)
+            addAction(MediaService.ACTION_MEDIA_PREV)
+            addAction(MediaService.ACTION_MEDIA_SEEK)
         }
-        // Bắt buộc dùng RECEIVER_EXPORTED trên Android 13/14 (targetSdk 34) vì nút RemoteAction
-        // trên cửa sổ PiP được kích hoạt bởi tiến trình hệ thống (com.android.systemui).
-        // Nếu dùng RECEIVER_NOT_EXPORTED, hệ thống sẽ chặn broadcast khiến nút Play/Pause không hoạt động.
+        // Dùng RECEIVER_EXPORTED để nhận PendingIntent từ SystemUI (PiP & Notification)
         ContextCompat.registerReceiver(
             this,
-            pipActionReceiver,
+            mediaActionReceiver,
             filter,
             ContextCompat.RECEIVER_EXPORTED
         )
@@ -107,6 +134,17 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webView)
         progressBar = findViewById(R.id.progressBar)
         customViewContainer = findViewById(R.id.customViewContainer)
+        floatingActionContainer = findViewById(R.id.floatingActionContainer)
+        btnReload = findViewById(R.id.btnReload)
+        btnSettings = findViewById(R.id.btnSettings)
+
+        btnReload.setOnClickListener {
+            webView.reload()
+        }
+
+        btnSettings.setOnClickListener {
+            showSettingsDialog()
+        }
 
         setupWebView()
         setupBackPressedHandler()
@@ -146,9 +184,7 @@ class MainActivity : AppCompatActivity() {
             userAgentString = settings.userAgentString.replace("; wv", "")
         }
 
-        // Không ép LAYER_TYPE_HARDWARE cho WebView: cửa sổ đã bật hardwareAccelerated,
-        // việc vẽ WebView vào một offscreen layer riêng có thể khiến khung hình video
-        // không được cập nhật khi WebView bị thu nhỏ (PiP) -> màn hình đen nhưng vẫn có tiếng.
+        // Không ép LAYER_TYPE_HARDWARE cho WebView để tránh lỗi màn hình đen trong PiP
         webView.setLayerType(View.LAYER_TYPE_NONE, null)
 
         webView.isFocusable = true
@@ -177,6 +213,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 return true
             }
+
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 if (newProgress < 100) {
                     progressBar.visibility = View.VISIBLE
@@ -197,6 +234,7 @@ class MainActivity : AppCompatActivity() {
                 isFullscreen = true
 
                 webView.visibility = View.GONE
+                floatingActionContainer.visibility = View.GONE
                 customViewContainer.visibility = View.VISIBLE
                 customViewContainer.addView(
                     view,
@@ -221,6 +259,7 @@ class MainActivity : AppCompatActivity() {
 
                 customViewContainer.visibility = View.GONE
                 webView.visibility = View.VISIBLE
+                floatingActionContainer.visibility = View.VISIBLE
 
                 window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -242,6 +281,87 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    /**
+     * Hiển thị BottomSheet Cài đặt ứng dụng
+     */
+    private fun showSettingsDialog() {
+        val dialog = BottomSheetDialog(this)
+        val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
+        dialog.setContentView(dialogView)
+
+        val switchAdBlock = dialogView.findViewById<SwitchMaterial>(R.id.switchAdBlock)
+        val switchBackgroundPlay = dialogView.findViewById<SwitchMaterial>(R.id.switchBackgroundPlay)
+        val switchAutoPip = dialogView.findViewById<SwitchMaterial>(R.id.switchAutoPip)
+        val switchPreloadCache = dialogView.findViewById<SwitchMaterial>(R.id.switchPreloadCache)
+        val tvCacheSize = dialogView.findViewById<TextView>(R.id.tvCacheSize)
+        val btnClearCache = dialogView.findViewById<MaterialButton>(R.id.btnClearCache)
+        val btnReloadInSettings = dialogView.findViewById<MaterialButton>(R.id.btnReloadInSettings)
+        val btnCloseSettings = dialogView.findViewById<MaterialButton>(R.id.btnCloseSettings)
+
+        // Khởi tạo trạng thái Switch từ AppSettings
+        switchAdBlock.isChecked = AppSettings.isAdBlockEnabled(this)
+        switchBackgroundPlay.isChecked = AppSettings.isBackgroundPlayEnabled(this)
+        switchAutoPip.isChecked = AppSettings.isAutoPipEnabled(this)
+        switchPreloadCache.isChecked = AppSettings.isPreloadCacheEnabled(this)
+
+        fun updateCacheDisplay() {
+            val totalBytes = WebResourceCacheManager.getCacheSizeBytes(this) + AppSettings.getCacheSizeBytes(this)
+            val mb = totalBytes.toDouble() / (1024.0 * 1024.0)
+            tvCacheSize.text = getString(R.string.setting_cache_size_format, mb)
+        }
+
+        updateCacheDisplay()
+
+        switchAdBlock.setOnCheckedChangeListener { _, isChecked ->
+            AppSettings.setAdBlockEnabled(this, isChecked)
+            AdBlockEngine.isEnabled = isChecked
+            syncSettingsToWeb()
+        }
+
+        switchBackgroundPlay.setOnCheckedChangeListener { _, isChecked ->
+            AppSettings.setBackgroundPlayEnabled(this, isChecked)
+            syncSettingsToWeb()
+        }
+
+        switchAutoPip.setOnCheckedChangeListener { _, isChecked ->
+            AppSettings.setAutoPipEnabled(this, isChecked)
+            syncSettingsToWeb()
+            updatePipParams()
+        }
+
+        switchPreloadCache.setOnCheckedChangeListener { _, isChecked ->
+            AppSettings.setPreloadCacheEnabled(this, isChecked)
+            WebResourceCacheManager.isEnabled = isChecked
+            syncSettingsToWeb()
+        }
+
+        btnClearCache.setOnClickListener {
+            WebResourceCacheManager.clearCache(this)
+            AppSettings.clearAppCache(this)
+            webView.clearCache(true)
+            updateCacheDisplay()
+        }
+
+        btnReloadInSettings.setOnClickListener {
+            dialog.dismiss()
+            webView.reload()
+        }
+
+        btnCloseSettings.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
+    }
+
+    private fun syncSettingsToWeb() {
+        val settingsJson = AppSettings.toJson(this)
+        webView.evaluateJavascript(
+            "if (window.__bravePip && window.__bravePip.applySettings) window.__bravePip.applySettings($settingsJson); else window.__braveSettings = $settingsJson;",
+            null
+        )
     }
 
     /**
@@ -295,8 +415,8 @@ class MainActivity : AppCompatActivity() {
         builder.setActions(listOf(action))
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setAutoEnterEnabled(isVideoPlaying || isFullscreen)
-            // Nội dung là video -> tắt seamless resize để hệ thống không crossfade/nhòe khi đổi kích thước
+            val autoPip = AppSettings.isAutoPipEnabled(this)
+            builder.setAutoEnterEnabled((isVideoPlaying || isFullscreen) && autoPip)
             builder.setSeamlessResizeEnabled(false)
         }
         return builder.build()
@@ -311,8 +431,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Chèn pip_controller.js (idempotent) rồi gọi window.__bravePip.<method>().
-     * Không phụ thuộc vào youtube_defuser.js, nên vẫn hoạt động kể cả khi scriptlet kia lỗi.
+     * Chèn pip_controller.js rồi gọi window.__bravePip.<method>().
      */
     private fun runPipCommand(method: String, onResult: ((String?) -> Unit)? = null) {
         val script = buildString {
@@ -329,33 +448,34 @@ class MainActivity : AppCompatActivity() {
 
     private fun enterPipLayout() {
         progressBar.visibility = View.GONE
+        floatingActionContainer.visibility = View.GONE
         runPipCommand("enter")
     }
 
     private fun exitPipLayout() {
+        floatingActionContainer.visibility = if (isFullscreen) View.GONE else View.VISIBLE
         runPipCommand("exit")
     }
 
-    // Xử lý khi người dùng bấm nút PLAY trên PiP
     private fun handlePipPlay() {
         isVideoPlaying = true
         updatePipParams()
         runPipCommand("play")
+        updateMediaService(isPlaying = true)
     }
 
-    // Xử lý khi người dùng bấm nút PAUSE trên PiP: mở khóa hook chặn pause rồi dừng video
     private fun handlePipPause() {
         isVideoPlaying = false
         updatePipParams()
         runPipCommand("pause")
+        updateMediaService(isPlaying = false)
     }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (isVideoPlaying || isFullscreen) {
+        val autoPip = AppSettings.isAutoPipEnabled(this)
+        if ((isVideoPlaying || isFullscreen) && autoPip) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Cô lập thẻ video ngay lập tức (không chờ callback JS, vì lúc callback trả về
-                // Activity có thể đã qua trạng thái cho phép vào PiP)
                 enterPipLayout()
                 try {
                     if (!isInPictureInPictureMode) {
@@ -375,7 +495,6 @@ class MainActivity : AppCompatActivity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         if (isInPictureInPictureMode) {
             enterPipLayout()
-            // Áp lại ở các nhịp sau khi WebView đã đổi kích thước theo khung PiP
             webView.postDelayed({ if (isInPipModeCompat()) enterPipLayout() }, 150)
             webView.postDelayed({ if (isInPipModeCompat()) enterPipLayout() }, 450)
             updatePipParams()
@@ -391,11 +510,14 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         if (!isInPipModeCompat()) {
             exitPipLayout()
+            runPipCommand("setBackground(false)")
         }
     }
 
     override fun onStart() {
         super.onStart()
+        runPipCommand("setBackground(false)")
+        // Dừng MediaService khi người dùng mở lại Activity
         stopMediaService()
     }
 
@@ -405,8 +527,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Dù đang ở PiP hay bình thường, nếu màn hình tắt mà video đang phát -> luôn chạy MediaService để giữ âm thanh!
-        if (isVideoPlaying) {
+        runPipCommand("setBackground(true)")
+        // Khi màn hình tắt hoặc app vào background, chỉ chạy MediaService nếu bật Background Play
+        val bgPlay = AppSettings.isBackgroundPlayEnabled(this)
+        if (isVideoPlaying && bgPlay) {
             startMediaService()
         }
     }
@@ -417,12 +541,31 @@ class MainActivity : AppCompatActivity() {
                 action = MediaService.ACTION_START
                 putExtra(MediaService.EXTRA_TITLE, currentTitle)
                 putExtra(MediaService.EXTRA_CHANNEL, currentChannel)
+                putExtra(MediaService.EXTRA_IS_PLAYING, isVideoPlaying)
+                putExtra(MediaService.EXTRA_POSITION_MS, positionMs)
+                putExtra(MediaService.EXTRA_DURATION_MS, durationMs)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
             } else {
                 startService(intent)
             }
+            isMediaServiceActive = true
+        } catch (_: Exception) {}
+    }
+
+    private fun updateMediaService(isPlaying: Boolean? = null) {
+        if (!isMediaServiceActive) return
+        try {
+            val intent = Intent(this, MediaService::class.java).apply {
+                action = MediaService.ACTION_UPDATE
+                putExtra(MediaService.EXTRA_TITLE, currentTitle)
+                putExtra(MediaService.EXTRA_CHANNEL, currentChannel)
+                putExtra(MediaService.EXTRA_IS_PLAYING, isPlaying ?: isVideoPlaying)
+                putExtra(MediaService.EXTRA_POSITION_MS, positionMs)
+                putExtra(MediaService.EXTRA_DURATION_MS, durationMs)
+            }
+            startService(intent)
         } catch (_: Exception) {}
     }
 
@@ -432,12 +575,13 @@ class MainActivity : AppCompatActivity() {
                 action = MediaService.ACTION_STOP
             }
             startService(intent)
+            isMediaServiceActive = false
         } catch (_: Exception) {}
     }
 
     override fun onDestroy() {
         try {
-            unregisterReceiver(pipActionReceiver)
+            unregisterReceiver(mediaActionReceiver)
         } catch (_: Exception) {}
         stopMediaService()
         webView.destroy()
@@ -452,6 +596,7 @@ class MainActivity : AppCompatActivity() {
                 if (title.isNotEmpty()) currentTitle = title
                 if (channel.isNotEmpty()) currentChannel = channel
                 updatePipParams()
+                updateMediaService(isPlaying = true)
             }
         }
 
@@ -460,6 +605,20 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 isVideoPlaying = false
                 updatePipParams()
+                updateMediaService(isPlaying = false)
+            }
+        }
+
+        @JavascriptInterface
+        fun onMediaStateChanged(playing: Boolean, title: String, channel: String, posMs: Long, durMs: Long) {
+            runOnUiThread {
+                isVideoPlaying = playing
+                if (title.isNotEmpty()) currentTitle = title
+                if (channel.isNotEmpty()) currentChannel = channel
+                if (posMs >= 0) positionMs = posMs
+                if (durMs > 0) durationMs = durMs
+                updatePipParams()
+                updateMediaService()
             }
         }
 

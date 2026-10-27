@@ -10,6 +10,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.brave.youtubelite.settings.AppSettings
 import java.io.ByteArrayInputStream
 
 /**
@@ -26,6 +27,7 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
     private var injectCssJs: String = ""
 
     init {
+        WebResourceCacheManager.init(context)
         loadAssets()
     }
 
@@ -79,6 +81,12 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
         try {
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 val origins = setOf("*")
+                if (WebResourceCacheManager.isEnabled) {
+                    val preloadScript = WebResourceCacheManager.getPreloadScript()
+                    if (preloadScript.isNotEmpty()) {
+                        WebViewCompat.addDocumentStartJavaScript(webView, preloadScript, origins)
+                    }
+                }
                 if (pipControllerCode.isNotEmpty()) {
                     WebViewCompat.addDocumentStartJavaScript(webView, pipControllerCode, origins)
                 }
@@ -105,6 +113,11 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
             return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
         }
 
+        val cachedResponse = WebResourceCacheManager.intercept(request)
+        if (cachedResponse != null) {
+            return cachedResponse
+        }
+
         return super.shouldInterceptRequest(view, request)
     }
 
@@ -127,14 +140,31 @@ class AppWebViewClient(private val context: Context) : WebViewClient() {
     private fun injectShields(webView: WebView?) {
         webView ?: return
 
+        if (WebResourceCacheManager.isEnabled) {
+            val preloadScript = WebResourceCacheManager.getPreloadScript()
+            if (preloadScript.isNotEmpty()) {
+                webView.evaluateJavascript(preloadScript, null)
+            }
+        }
         if (pipControllerCode.isNotEmpty()) {
             webView.evaluateJavascript(pipControllerCode, null)
         }
         if (scriptletCode.isNotEmpty()) {
             webView.evaluateJavascript(scriptletCode, null)
         }
-        if (injectCssJs.isNotEmpty()) {
+        // Đồng bộ cấu hình từ AppSettings xuống tầng JS
+        val settingsJson = AppSettings.toJson(context)
+        webView.evaluateJavascript(
+            "if (window.__bravePip && window.__bravePip.applySettings) window.__bravePip.applySettings($settingsJson); else window.__braveSettings = $settingsJson;",
+            null
+        )
+        if (AdBlockEngine.isEnabled && injectCssJs.isNotEmpty()) {
             webView.evaluateJavascript(injectCssJs, null)
+        } else if (!AdBlockEngine.isEnabled) {
+            webView.evaluateJavascript(
+                "(function(){var s=document.getElementById('__brave_cosmetic_style');if(s&&s.parentNode)s.parentNode.removeChild(s);})();",
+                null
+            )
         }
     }
 }

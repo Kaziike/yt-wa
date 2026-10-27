@@ -3,13 +3,31 @@
  * 1. Chặn và gọt sạch metadata quảng cáo (InnerTube & SSAI 16x)
  * 2. Cơ chế chạy nền & Chống tự động ngắt video khi ở kích thước nhỏ (PLAYER_VIEW_TOO_SMALL)
  * 3. Chế độ Video Popup PiP: xem scriptlets/pip_controller.js (được Kotlin chèn riêng)
- * 4. Đồng bộ trạng thái phát với Android Native Bridge
+ * 4. Đồng bộ trạng thái phát & Media Metadata với Android Native Bridge
  */
 
 (function() {
     'use strict';
     if (window.__brave_yt_shield_active) return;
     window.__brave_yt_shield_active = true;
+
+    window.__braveSettings = Object.assign({
+        adblock: true,
+        backgroundPlay: true,
+        autoPip: true
+    }, window.__braveSettings || {});
+
+    if (typeof window.__braveAppInBackground === 'undefined') {
+        window.__braveAppInBackground = false;
+    }
+
+    function isAdblockEnabled() {
+        return !(window.__braveSettings && window.__braveSettings.adblock === false);
+    }
+
+    function isBgPlayEnabled() {
+        return !(window.__braveSettings && window.__braveSettings.backgroundPlay === false);
+    }
 
     console.log('[BraveShield] Khởi chạy YouTube Engine 4.0...');
 
@@ -18,6 +36,7 @@
     // ==============================================================
     function sanitizePlayerObj(obj) {
         if (!obj || typeof obj !== 'object') return obj;
+        if (!isAdblockEnabled()) return obj;
 
         if (obj.playerResponse) {
             delete obj.playerResponse.adPlacements;
@@ -59,6 +78,8 @@
         const originalFetch = window.fetch;
         window.fetch = async function(...args) {
             const response = await originalFetch.apply(this, args);
+            if (!isAdblockEnabled()) return response;
+
             const url = args[0] ? (typeof args[0] === 'string' ? args[0] : args[0].url) : '';
 
             if (url && url.includes('/youtubei/v1/player')) {
@@ -86,6 +107,8 @@
     let savedVolume = 1.0;
 
     setInterval(function() {
+        if (!isAdblockEnabled()) return;
+
         const video = document.querySelector('video');
         const adShowingElement = document.querySelector('.ad-showing, .ad-interrupting, .video-ads, [class*="ytp-ad-player-overlay"]');
 
@@ -121,25 +144,51 @@
     // ==============================================================
     ['visibilitychange', 'webkitvisibilitychange', 'pagehide'].forEach(eventType => {
         window.addEventListener(eventType, function(e) {
-            e.stopImmediatePropagation();
+            const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
+            if (isBgPlayEnabled() || isPipMode) {
+                e.stopImmediatePropagation();
+            }
         }, true);
         document.addEventListener(eventType, function(e) {
-            e.stopImmediatePropagation();
+            const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
+            if (isBgPlayEnabled() || isPipMode) {
+                e.stopImmediatePropagation();
+            }
         }, true);
     });
 
     try {
-        Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
-        Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+        Object.defineProperty(document, 'hidden', {
+            get: function() {
+                const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
+                if (isBgPlayEnabled() || isPipMode) return false;
+                return !!window.__braveAppInBackground;
+            },
+            configurable: true
+        });
+        Object.defineProperty(document, 'visibilityState', {
+            get: function() {
+                const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
+                if (isBgPlayEnabled() || isPipMode) return 'visible';
+                return window.__braveAppInBackground ? 'hidden' : 'visible';
+            },
+            configurable: true
+        });
     } catch (e) {}
 
-    // Cờ kiểm soát: Chỉ cho phép pause khi người dùng hoặc nút Native PiP chủ động bấm
-    // - __isUserExplicitPause: cho phép đúng 1 lệnh pause
-    // - __braveAllowPauseUntil: cho phép pause trong một khoảng thời gian (nút Pause trên PiP)
+    // Cờ kiểm soát:
+    // - __braveUserPaused: người dùng chủ động bấm Pause từ PiP / Notification
+    // - __braveProtectPlayUntil: khoảng thời gian bảo vệ tuyệt đối sau khi bấm Play từ PiP / Notification
+    // - __isUserExplicitPause & __braveAllowPauseUntil: cho phép pause khi người dùng thao tác trực tiếp
     window.__isUserExplicitPause = false;
     window.__braveAllowPauseUntil = 0;
+
     window.addEventListener('pointerdown', function(e) {
-        if (e.target && e.target.closest && e.target.closest('.ytp-play-button, button[aria-label*="Pause" i], button[aria-label*="Tạm dừng" i]')) {
+        if (e.target && e.target.closest && e.target.closest(
+            '.ytp-play-button, .player-control-play-pause-icon, #player-control-overlay button, ' +
+            'button[aria-label*="Pause" i], button[aria-label*="Tạm dừng" i], ' +
+            '[aria-label*="Pause" i], [aria-label*="Tạm dừng" i]'
+        )) {
             window.__isUserExplicitPause = true;
             setTimeout(() => { window.__isUserExplicitPause = false; }, 800);
         }
@@ -152,9 +201,35 @@
     window.__braveNativePause = nativeMediaPause;
 
     HTMLMediaElement.prototype.pause = function() {
-        if (window.__braveUserPaused) {
+        // 1. Nếu người dùng chủ động bấm Pause từ PiP / Notification -> cho phép ngay
+        if (window.__braveUserPaused === true) {
             return nativeMediaPause.apply(this, arguments);
         }
+
+        // 2. Nếu vừa bấm Play từ PiP / Notification -> CHẶN TUYỆT ĐỐI mọi lệnh auto-pause của YouTube
+        if (window.__braveProtectPlayUntil && Date.now() < window.__braveProtectPlayUntil) {
+            console.log('[BraveShield] Đã chặn lệnh auto-pause trong thời gian bảo vệ Play!');
+            return;
+        }
+
+        const isPipMode = !!(window.__bravePip && typeof window.__bravePip.isActive === 'function' && window.__bravePip.isActive());
+        const isPipTransition = !!(window.__bravePipTransitionUntil && Date.now() < window.__bravePipTransitionUntil);
+        const isBackground = !!window.__braveAppInBackground;
+        const bgPlayEnabled = isBgPlayEnabled();
+
+        // 3. KHI ĐANG MỞ FULL ỨNG DỤNG BÌNH THƯỜNG TRÊN MÀN HÌNH:
+        // Luôn cho phép nativeMediaPause để mọi nút Play/Pause trên giao diện web hoạt động tự nhiên 100%, không bao giờ bị khóa!
+        if (!isPipMode && !isPipTransition && !isBackground) {
+            return nativeMediaPause.apply(this, arguments);
+        }
+
+        // Nếu đang ở dưới nền nhưng người dùng đã tắt tính năng phát trong nền (và không ở chế độ PiP)
+        if (isBackground && !isPipMode && !isPipTransition && !bgPlayEnabled) {
+            return nativeMediaPause.apply(this, arguments);
+        }
+
+        // 4. Khi đang ở PiP, đang chuyển tiếp PiP, hoặc chạy nền (với bgPlayEnabled):
+        // Chỉ cho phép pause nếu có cờ chủ động từ người dùng
         if (window.__braveAllowPauseUntil && Date.now() < window.__braveAllowPauseUntil) {
             window.__isUserExplicitPause = false;
             return nativeMediaPause.apply(this, arguments);
@@ -173,7 +248,6 @@
     // 4. TỈ LỆ KHUNG HÌNH VIDEO CHO CỬA SỔ PIP
     //    (Phần cô lập video khi vào PiP nằm ở scriptlets/pip_controller.js)
     // ==============================================================
-    // Chọn thẻ video chính: ưu tiên video đang phát, sau đó video có độ phân giải lớn nhất
     function pickMainVideo() {
         if (window.__bravePip && window.__bravePip.mainVideo) return window.__bravePip.mainVideo();
         const videos = Array.prototype.slice.call(document.querySelectorAll('video'));
@@ -189,7 +263,6 @@
         return best;
     }
 
-    // Báo tỉ lệ khung hình thật của video để cửa sổ PiP khớp với video (không bị viền thừa)
     let lastReportedSize = '';
     function reportVideoSize(video) {
         if (!window.AndroidBridge || !video || !video.videoWidth || !video.videoHeight) return;
@@ -206,34 +279,69 @@
     });
 
     // ==============================================================
-    // 5. ĐỒNG BỘ TRẠNG THÁI PHÁT VỚI ANDROID NATIVE
+    // 5. ĐỒNG BỘ TRẠNG THÁI PHÁT & MEDIA METADATA VỚI ANDROID NATIVE
     // ==============================================================
+    function extractMetadata() {
+        const titleEl = document.querySelector(
+            'h1.slim-video-metadata-title, .ytm-slim-video-metadata-renderer-title, .media-item-headline, .ytp-title-link'
+        );
+        const channelEl = document.querySelector(
+            '.ytm-channel-thumbnail-with-profile-name, .slim-owner-channel-name, .subhead, .ytd-channel-name'
+        );
+        const rawTitle = titleEl && titleEl.innerText ? titleEl.innerText.trim() : '';
+        const docTitle = document.title ? document.title.replace(/\s*-\s*YouTube$/i, '').trim() : '';
+        const title = rawTitle || docTitle || 'YouTube Lite';
+        const channel = channelEl && channelEl.innerText ? channelEl.innerText.trim() : '';
+        return { title: title, channel: channel };
+    }
+
     function syncNativeState() {
         if (!window.AndroidBridge) return;
 
         const video = pickMainVideo();
         if (video) reportVideoSize(video);
-        if (video && !video.paused && !video.ended) {
-            window.__braveUserPaused = false;
-            const titleEl = document.querySelector('h1.slim-video-metadata-title, .ytm-slim-video-metadata-renderer-title, .media-item-headline');
-            const channelEl = document.querySelector('.ytm-channel-thumbnail-with-profile-name, .slim-owner-channel-name, .subhead');
-            const title = titleEl ? titleEl.innerText.trim() : 'YouTube Lite';
-            const channel = channelEl ? channelEl.innerText.trim() : '';
 
-            try { window.AndroidBridge.onVideoPlaying(title, channel); } catch (e) {}
+        const meta = extractMetadata();
+        const isPlaying = !!(video && !video.paused && !video.ended);
+        const positionMs = video && isFinite(video.currentTime) ? Math.round(video.currentTime * 1000) : 0;
+        const durationMs = video && isFinite(video.duration) && video.duration > 0 ? Math.round(video.duration * 1000) : 0;
+
+        if (isPlaying) {
+            window.__braveUserPaused = false;
+            try { window.AndroidBridge.onVideoPlaying(meta.title, meta.channel); } catch (e) {}
+            try {
+                if (typeof window.AndroidBridge.onMediaStateChanged === 'function') {
+                    window.AndroidBridge.onMediaStateChanged(true, meta.title, meta.channel, positionMs, durationMs);
+                }
+            } catch (e) {}
         } else {
             // Nếu vừa bấm Play trên PiP và video đang khởi chạy (Promise play chưa xong), không báo paused đè lên
             if (window.__bravePlayPendingUntil && Date.now() < window.__bravePlayPendingUntil) {
                 return;
             }
             try { window.AndroidBridge.onVideoPaused(); } catch (e) {}
+            try {
+                if (typeof window.AndroidBridge.onMediaStateChanged === 'function') {
+                    window.AndroidBridge.onMediaStateChanged(false, meta.title, meta.channel, positionMs, durationMs);
+                }
+            } catch (e) {}
         }
     }
+
+    window.__braveSyncMediaState = syncNativeState;
 
     ['play', 'playing'].forEach(function(eventType) {
         document.addEventListener(eventType, function(e) {
             if (e.target && e.target.tagName === 'VIDEO') {
                 window.__braveUserPaused = false;
+                syncNativeState();
+            }
+        }, true);
+    });
+
+    ['loadedmetadata', 'durationchange', 'seeked', 'ratechange'].forEach(function(eventType) {
+        document.addEventListener(eventType, function(e) {
+            if (e.target && e.target.tagName === 'VIDEO') {
                 syncNativeState();
             }
         }, true);

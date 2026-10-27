@@ -12,6 +12,7 @@ import java.io.InputStreamReader
  */
 object AdBlockEngine {
     private const val TAG = "AdBlockEngine"
+    @Volatile var isEnabled: Boolean = true
     private val blockedDomains = HashSet<String>()
     private val blockedPathPatterns = listOf(
         "/api/stats/ads",
@@ -38,6 +39,7 @@ object AdBlockEngine {
     }
 
     fun isBlocked(url: String): Boolean {
+        if (!isEnabled) return false
         if (url.isEmpty()) return false
 
         try {
