@@ -90,6 +90,8 @@ class MainActivity : AppCompatActivity() {
     private var isFullscreen = false
 
     private var panelState = PanelState.HIDDEN
+    private var wasCollapsedBeforePip = false
+    private val bottomNavHeightDp = 48f
     private var isVideoPlaying = false
     private var currentTitle = "LiteTube"
     private var currentChannel = ""
@@ -397,6 +399,7 @@ class MainActivity : AppCompatActivity() {
             val params = playerPanel.layoutParams as FrameLayout.LayoutParams
             params.height = ViewGroup.LayoutParams.MATCH_PARENT
             params.gravity = Gravity.TOP
+            params.bottomMargin = 0
             playerPanel.layoutParams = params
             playerPanel.setBackgroundColor(Color.BLACK)
 
@@ -425,13 +428,15 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Thu nhỏ lớp xem video xuống thanh MiniPlayer ở đáy màn hình (COLLAPSED)
+     * Đặt MiniPlayer nằm ngay trên thanh Bottom Navigation Bar (Tablist cao 48dp) của YouTube
      */
     fun collapsePlayer() {
         if (panelState == PanelState.COLLAPSED || panelState == PanelState.HIDDEN) return
         panelState = PanelState.COLLAPSED
 
+        val bottomNavH = dpToPx(bottomNavHeightDp)
         val miniH = dpToPx(64f)
-        val targetY = (mainContainer.height - miniH).coerceAtLeast(0f)
+        val targetY = (mainContainer.height - bottomNavH - miniH).coerceAtLeast(0f)
         val miniW = dpToPx(104f)
         val screenW = mainContainer.width.toFloat().coerceAtLeast(1f)
         val scale = miniW / screenW
@@ -446,10 +451,12 @@ class MainActivity : AppCompatActivity() {
             .setDuration(260)
             .setInterpolator(DecelerateInterpolator())
             .withEndAction {
-                // Thu gọn kích thước playerPanel xuống đúng 64dp ở đáy để giải phóng hoàn toàn touch cho trang chủ bên dưới
+                // Thu gọn kích thước playerPanel xuống 64dp, nằm ngay trên Bottom Navigation Bar (cách đáy 48dp)
+                // để thanh tablist bên dưới không bị che khuất và trang chủ hoàn toàn tự do nhận touch
                 val params = playerPanel.layoutParams as FrameLayout.LayoutParams
                 params.height = miniH.toInt()
                 params.gravity = Gravity.BOTTOM
+                params.bottomMargin = bottomNavH.toInt()
                 playerPanel.layoutParams = params
                 playerPanel.translationY = 0f
                 playerPanel.setBackgroundColor(Color.TRANSPARENT)
@@ -475,13 +482,15 @@ class MainActivity : AppCompatActivity() {
         if (panelState == PanelState.EXPANDED || panelState == PanelState.HIDDEN) return
         panelState = PanelState.EXPANDED
 
+        val bottomNavH = dpToPx(bottomNavHeightDp)
         val miniH = dpToPx(64f)
-        val targetY = (mainContainer.height - miniH).coerceAtLeast(0f)
+        val targetY = (mainContainer.height - bottomNavH - miniH).coerceAtLeast(0f)
 
-        // Phục hồi layoutParams MATCH_PARENT nhưng bắt đầu từ vị trí đáy
+        // Phục hồi layoutParams MATCH_PARENT nhưng bắt đầu từ vị trí miniplayer hiện tại
         val params = playerPanel.layoutParams as FrameLayout.LayoutParams
         params.height = ViewGroup.LayoutParams.MATCH_PARENT
         params.gravity = Gravity.TOP
+        params.bottomMargin = 0
         playerPanel.layoutParams = params
         playerPanel.translationY = targetY
         playerPanel.setBackgroundColor(Color.BLACK)
@@ -524,6 +533,7 @@ class MainActivity : AppCompatActivity() {
                 val params = playerPanel.layoutParams as FrameLayout.LayoutParams
                 params.height = ViewGroup.LayoutParams.MATCH_PARENT
                 params.gravity = Gravity.TOP
+                params.bottomMargin = 0
                 playerPanel.layoutParams = params
                 playerPanel.translationY = 0f
                 playerPanel.setBackgroundColor(Color.BLACK)
@@ -604,12 +614,9 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 // 2. Nếu MiniPlayer đang thu nhỏ ở đáy (COLLAPSED):
+                // Bấm Back sẽ đóng MiniPlayer ngay lập tức để người dùng tập trung lướt trang chủ
                 if (panelState == PanelState.COLLAPSED) {
-                    if (webView.canGoBack()) {
-                        webView.goBack()
-                    } else {
-                        closePlayer()
-                    }
+                    closePlayer()
                     return
                 }
 
@@ -786,6 +793,34 @@ class MainActivity : AppCompatActivity() {
     private fun enterPipLayout() {
         progressBar.visibility = View.GONE
         swipeRefreshLayout.isEnabled = false
+
+        // Nếu đang ở MiniPlayer mà vào PiP: Phải đưa playerPanel về full screen và ẩn Browse view để PiP chụp đúng video!
+        if (panelState == PanelState.COLLAPSED) {
+            wasCollapsedBeforePip = true
+
+            // Tạm thời ẩn Browse View để cửa sổ PiP chỉ render duy nhất video của playerWebView
+            swipeRefreshLayout.visibility = View.GONE
+
+            val params = playerPanel.layoutParams as FrameLayout.LayoutParams
+            params.height = ViewGroup.LayoutParams.MATCH_PARENT
+            params.gravity = Gravity.TOP
+            params.bottomMargin = 0
+            playerPanel.layoutParams = params
+            playerPanel.translationY = 0f
+            playerPanel.setBackgroundColor(Color.BLACK)
+
+            miniPlayerBar.visibility = View.GONE
+            btnMinimizePlayer.visibility = View.GONE
+            playerDragArea.visibility = View.GONE
+
+            playerWebView.pivotX = 0f
+            playerWebView.pivotY = 0f
+            playerWebView.scaleX = 1f
+            playerWebView.scaleY = 1f
+            playerWebView.translationX = 0f
+            playerWebView.translationY = 0f
+        }
+
         val target = if (panelState != PanelState.HIDDEN) playerWebView else webView
         target.evaluateJavascript(
             "window.__braveEnteringPip = true; window.__braveProtectPlayUntil = Date.now() + 3500;",
@@ -795,10 +830,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun exitPipLayout() {
+        swipeRefreshLayout.visibility = View.VISIBLE
         if (!isFullscreen) {
             swipeRefreshLayout.isEnabled = true
         }
         runPipCommand("exit")
+
+        // Nếu trước khi vào PiP người dùng đang ở MiniPlayer, tự động thu nhỏ trở lại MiniPlayer
+        if (wasCollapsedBeforePip) {
+            wasCollapsedBeforePip = false
+            panelState = PanelState.EXPANDED
+            collapsePlayer()
+        }
     }
 
     private fun handlePipPlay() {
