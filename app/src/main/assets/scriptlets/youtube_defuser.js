@@ -350,6 +350,12 @@
 
     document.addEventListener('pause', function(e) {
         if (e.target && e.target.tagName === 'VIDEO') {
+            // Sự kiện pause thật chỉ xảy ra khi lệnh pause đã được cho phép (người dùng chủ động dừng)
+            // → ghi nhận để khi mở lại app / thoát popup không tự ép phát lại video
+            const inProtect = window.__braveProtectPlayUntil && Date.now() < window.__braveProtectPlayUntil;
+            if (!inProtect && !e.target.ended && e.isTrusted) {
+                window.__braveUserPaused = true;
+            }
             setTimeout(syncNativeState, 200);
         }
     }, true);

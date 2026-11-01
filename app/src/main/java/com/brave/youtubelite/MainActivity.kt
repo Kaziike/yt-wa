@@ -57,6 +57,16 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_PIP_PAUSE = "com.brave.youtubelite.PIP_PAUSE"
         private const val TAG = "MainActivity"
         private const val WEB_LOG_TAG = "WebConsole"
+
+        // Đo khung player thật trong trang (CSS px): "left,top,width,height,innerWidth"
+        private const val VIDEO_RECT_JS = "(function(){try{" +
+            "var el=document.getElementById('movie_player')||document.querySelector('.html5-video-player');" +
+            "var v=(window.__bravePip&&window.__bravePip.mainVideo&&window.__bravePip.mainVideo())||document.querySelector('video');" +
+            "var r=el?el.getBoundingClientRect():null;" +
+            "if((!r||r.width<20||r.height<20)&&v){r=v.getBoundingClientRect();}" +
+            "if(!r)return '';" +
+            "return [r.left,r.top,r.width,r.height,window.innerWidth].join(',');" +
+            "}catch(e){return '';}})()"
     }
 
     enum class PanelState {
@@ -92,6 +102,7 @@ class MainActivity : AppCompatActivity() {
     private var panelState = PanelState.HIDDEN
     private var wasCollapsedBeforePip = false
     private val bottomNavHeightDp = 48f
+    private var lastMiniIconPlaying: Boolean? = null
     private var isVideoPlaying = false
     private var currentTitle = "LiteTube"
     private var currentChannel = ""
@@ -234,7 +245,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupBrowseWebView() {
         configureWebSettings(webView)
 
-        webView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
+        webView.addJavascriptInterface(MediaBridge(fromPlayer = false), "AndroidBridge")
         val browseClient = AppWebViewClient(applicationContext, isBrowseMode = true).apply {
             onInterceptWatchUrl = { url ->
                 // Nếu bấm vào video thông thường (/watch?v=... trừ Shorts): Mở lớp phát đè lên!
@@ -274,7 +285,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupPlayerWebView() {
         configureWebSettings(playerWebView)
 
-        playerWebView.addJavascriptInterface(MediaBridge(), "AndroidBridge")
+        playerWebView.addJavascriptInterface(MediaBridge(fromPlayer = true), "AndroidBridge")
         val playerClient = AppWebViewClient(applicationContext, isBrowseMode = false)
         playerClient.installDocumentStartScripts(playerWebView)
         playerWebView.webViewClient = playerClient
@@ -403,15 +414,18 @@ class MainActivity : AppCompatActivity() {
             playerPanel.layoutParams = params
             playerPanel.setBackgroundColor(Color.BLACK)
 
+            playerPanel.animate().cancel()
             playerPanel.visibility = View.VISIBLE
             playerPanel.translationY = 0f
 
-            playerWebView.pivotX = 0f
-            playerWebView.pivotY = 0f
-            playerWebView.scaleX = 1f
-            playerWebView.scaleY = 1f
-            playerWebView.translationX = 0f
-            playerWebView.translationY = 0f
+            resetPlayerWebViewTransform()
+            unlockPlayerWebViewSize()
+
+            // Reset thông tin MiniPlayer cho video mới
+            currentTitle = "LiteTube"
+            currentChannel = ""
+            tvMiniPlayerTitle.text = currentTitle
+            tvMiniPlayerChannel.text = currentChannel
 
             miniPlayerBar.visibility = View.GONE
             btnMinimizePlayer.visibility = View.VISIBLE
@@ -434,32 +448,69 @@ class MainActivity : AppCompatActivity() {
         if (panelState == PanelState.COLLAPSED || panelState == PanelState.HIDDEN) return
         panelState = PanelState.COLLAPSED
 
-        val bottomNavH = dpToPx(bottomNavHeightDp)
-        val miniH = dpToPx(64f)
-        val targetY = (mainContainer.height - bottomNavH - miniH).coerceAtLeast(0f)
-        val miniW = dpToPx(104f)
-        val screenW = mainContainer.width.toFloat().coerceAtLeast(1f)
-        val scale = miniW / screenW
+        val fullW = mainContainer.width
+        val fullH = mainContainer.height
+
+        // QUAN TRỌNG: Khóa cứng kích thước playerWebView bằng toàn màn hình.
+        // Nếu để MATCH_PARENT, khi panel co về 64dp thì WebView cũng co theo → viewport web chỉ còn ~64px
+        // → YouTube tưởng đang ở popup nhỏ (tự bật CSS PiP, auto-pause bị chặn, lệch trạng thái nút Play/Pause)
+        // và video hiển thị sai kích thước.
+        lockPlayerWebViewSize(fullW, fullH)
 
         miniPlayerBar.visibility = View.VISIBLE
         miniPlayerBar.alpha = 1f
         btnMinimizePlayer.visibility = View.GONE
         playerDragArea.visibility = View.GONE
 
+        // Đo vị trí thật của khung video trong trang để thu nhỏ chính xác vào ô 104x58dp
+        playerWebView.evaluateJavascript(VIDEO_RECT_JS) { result ->
+            if (panelState != PanelState.COLLAPSED) return@evaluateJavascript
+            animateToMini(fullW, fullH, parseVideoRect(result))
+        }
+    }
+
+    /** Tính toán & chạy animation thu nhỏ khung video vào ô MiniPlayer. */
+    private fun animateToMini(fullW: Int, fullH: Int, rect: FloatArray?) {
+        val bottomNavH = dpToPx(bottomNavHeightDp)
+        val miniH = dpToPx(64f)
+        val boxW = dpToPx(104f)
+        val boxH = dpToPx(58f)
+        val boxLeft = dpToPx(4f)
+        val targetY = (fullH - bottomNavH - miniH).coerceAtLeast(0f)
+
+        // Mặc định: player nằm sát đỉnh trang, rộng full màn hình, tỉ lệ 16:9
+        var vLeft = 0f
+        var vTop = 0f
+        var vW = fullW.toFloat().coerceAtLeast(1f)
+        var vH = vW * 9f / 16f
+        if (rect != null) {
+            // rect = [left, top, width, height, innerWidth] theo CSS px → đổi sang pixel View
+            val ratio = if (rect[4] > 0f) fullW / rect[4] else resources.displayMetrics.density
+            vLeft = rect[0] * ratio
+            vTop = rect[1] * ratio
+            vW = (rect[2] * ratio).coerceAtLeast(1f)
+            vH = (rect[3] * ratio).coerceAtLeast(1f)
+        }
+
+        val scale = minOf(boxW / vW, boxH / vH)
+        val tx = boxLeft + (boxW - vW * scale) / 2f - vLeft * scale
+        val ty = (miniH - vH * scale) / 2f - vTop * scale
+
         playerPanel.animate()
             .translationY(targetY)
             .setDuration(260)
             .setInterpolator(DecelerateInterpolator())
             .withEndAction {
-                // Thu gọn kích thước playerPanel xuống 64dp, nằm ngay trên Bottom Navigation Bar (cách đáy 48dp)
-                // để thanh tablist bên dưới không bị che khuất và trang chủ hoàn toàn tự do nhận touch
+                if (panelState != PanelState.COLLAPSED) return@withEndAction
+                // Thu gọn panel xuống 64dp ngay trên Bottom Navigation Bar (48dp) → tablist không bị che,
+                // trang chủ phía trên tự do nhận touch. WebView vẫn giữ kích thước full nên không bị relayout.
                 val params = playerPanel.layoutParams as FrameLayout.LayoutParams
                 params.height = miniH.toInt()
                 params.gravity = Gravity.BOTTOM
                 params.bottomMargin = bottomNavH.toInt()
                 playerPanel.layoutParams = params
                 playerPanel.translationY = 0f
-                playerPanel.setBackgroundColor(Color.TRANSPARENT)
+                playerPanel.setBackgroundColor(Color.parseColor("#212121"))
             }
             .start()
 
@@ -468,11 +519,53 @@ class MainActivity : AppCompatActivity() {
         playerWebView.animate()
             .scaleX(scale)
             .scaleY(scale)
-            .translationX(dpToPx(4f))
-            .translationY(dpToPx(3f))
+            .translationX(tx)
+            .translationY(ty)
             .setDuration(260)
             .setInterpolator(DecelerateInterpolator())
             .start()
+    }
+
+    private fun parseVideoRect(result: String?): FloatArray? {
+        return try {
+            val raw = result?.trim()?.trim('"') ?: return null
+            if (raw.isEmpty() || raw == "null") return null
+            val parts = raw.split(",").map { it.trim().toFloat() }
+            if (parts.size < 5 || parts[2] < 20f || parts[3] < 20f) null else parts.toFloatArray()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Giữ playerWebView ở kích thước cố định (full màn hình) khi panel bị co nhỏ. */
+    private fun lockPlayerWebViewSize(w: Int, h: Int) {
+        if (w <= 0 || h <= 0) return
+        val lp = playerWebView.layoutParams as FrameLayout.LayoutParams
+        if (lp.width != w || lp.height != h) {
+            lp.width = w
+            lp.height = h
+            playerWebView.layoutParams = lp
+        }
+    }
+
+    /** Trả playerWebView về MATCH_PARENT (dùng khi xem full / PiP / fullscreen). */
+    private fun unlockPlayerWebViewSize() {
+        val lp = playerWebView.layoutParams as FrameLayout.LayoutParams
+        if (lp.width != ViewGroup.LayoutParams.MATCH_PARENT || lp.height != ViewGroup.LayoutParams.MATCH_PARENT) {
+            lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+            lp.height = ViewGroup.LayoutParams.MATCH_PARENT
+            playerWebView.layoutParams = lp
+        }
+    }
+
+    private fun resetPlayerWebViewTransform() {
+        playerWebView.animate().cancel()
+        playerWebView.pivotX = 0f
+        playerWebView.pivotY = 0f
+        playerWebView.scaleX = 1f
+        playerWebView.scaleY = 1f
+        playerWebView.translationX = 0f
+        playerWebView.translationY = 0f
     }
 
     /**
@@ -482,11 +575,17 @@ class MainActivity : AppCompatActivity() {
         if (panelState == PanelState.EXPANDED || panelState == PanelState.HIDDEN) return
         panelState = PanelState.EXPANDED
 
+        val fullW = mainContainer.width
+        val fullH = mainContainer.height
         val bottomNavH = dpToPx(bottomNavHeightDp)
         val miniH = dpToPx(64f)
-        val targetY = (mainContainer.height - bottomNavH - miniH).coerceAtLeast(0f)
+        val targetY = (fullH - bottomNavH - miniH).coerceAtLeast(0f)
 
-        // Phục hồi layoutParams MATCH_PARENT nhưng bắt đầu từ vị trí miniplayer hiện tại
+        // Giữ WebView full size trong lúc animate để không bị relayout giữa chừng
+        lockPlayerWebViewSize(fullW, fullH)
+
+        // Phục hồi panel MATCH_PARENT nhưng bắt đầu từ vị trí miniplayer hiện tại
+        playerPanel.animate().cancel()
         val params = playerPanel.layoutParams as FrameLayout.LayoutParams
         params.height = ViewGroup.LayoutParams.MATCH_PARENT
         params.gravity = Gravity.TOP
@@ -503,6 +602,13 @@ class MainActivity : AppCompatActivity() {
             .translationY(0f)
             .setDuration(260)
             .setInterpolator(DecelerateInterpolator())
+            .withEndAction {
+                if (panelState != PanelState.EXPANDED) return@withEndAction
+                unlockPlayerWebViewSize()
+                // Đồng bộ lại trạng thái nội bộ của YouTube Player với thẻ <video> thật
+                // để nút Play/Pause của YouTube hoạt động ngay sau khi bung to
+                runPipCommand("resync")
+            }
             .start()
 
         playerWebView.pivotX = 0f
@@ -525,6 +631,7 @@ class MainActivity : AppCompatActivity() {
         panelState = PanelState.HIDDEN
 
         val targetY = mainContainer.height.toFloat()
+        playerPanel.animate().cancel()
         playerPanel.animate()
             .translationY(targetY)
             .setDuration(200)
@@ -538,8 +645,12 @@ class MainActivity : AppCompatActivity() {
                 playerPanel.translationY = 0f
                 playerPanel.setBackgroundColor(Color.BLACK)
 
+                resetPlayerWebViewTransform()
+                unlockPlayerWebViewSize()
+
                 playerWebView.loadUrl("about:blank")
                 isVideoPlaying = false
+                lastMiniIconPlaying = null
                 stopMediaService()
                 updatePipParams()
             }
@@ -805,6 +916,7 @@ class MainActivity : AppCompatActivity() {
             params.height = ViewGroup.LayoutParams.MATCH_PARENT
             params.gravity = Gravity.TOP
             params.bottomMargin = 0
+            playerPanel.animate().cancel()
             playerPanel.layoutParams = params
             playerPanel.translationY = 0f
             playerPanel.setBackgroundColor(Color.BLACK)
@@ -813,12 +925,9 @@ class MainActivity : AppCompatActivity() {
             btnMinimizePlayer.visibility = View.GONE
             playerDragArea.visibility = View.GONE
 
-            playerWebView.pivotX = 0f
-            playerWebView.pivotY = 0f
-            playerWebView.scaleX = 1f
-            playerWebView.scaleY = 1f
-            playerWebView.translationX = 0f
-            playerWebView.translationY = 0f
+            // WebView phải co giãn theo cửa sổ PiP → trả về MATCH_PARENT
+            resetPlayerWebViewTransform()
+            unlockPlayerWebViewSize()
         }
 
         val target = if (panelState != PanelState.HIDDEN) playerWebView else webView
@@ -836,11 +945,18 @@ class MainActivity : AppCompatActivity() {
         }
         runPipCommand("exit")
 
-        // Nếu trước khi vào PiP người dùng đang ở MiniPlayer, tự động thu nhỏ trở lại MiniPlayer
+        // Nếu trước khi vào PiP người dùng đang ở MiniPlayer → chờ cửa sổ bung lại full kích thước
+        // rồi mới thu nhỏ về MiniPlayer (nếu thu ngay, kích thước mainContainer vẫn còn là kích thước PiP)
         if (wasCollapsedBeforePip) {
             wasCollapsedBeforePip = false
             panelState = PanelState.EXPANDED
-            collapsePlayer()
+            btnMinimizePlayer.visibility = View.VISIBLE
+            playerDragArea.visibility = View.VISIBLE
+            mainContainer.postDelayed({
+                if (panelState == PanelState.EXPANDED && !isInPipModeCompat() && !isFullscreen) {
+                    collapsePlayer()
+                }
+            }, 450)
         }
     }
 
@@ -982,7 +1098,35 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    inner class MediaBridge {
+    /**
+     * Cập nhật trạng thái phát + MiniPlayer Bar. Chỉ set lại View khi giá trị thực sự thay đổi
+     * để tránh nhấp nháy giao diện.
+     */
+    private fun applyMediaState(playing: Boolean, title: String, channel: String, posMs: Long, durMs: Long) {
+        val playingChanged = playing != isVideoPlaying
+        isVideoPlaying = playing
+
+        val cleanTitle = title.trim()
+        if (cleanTitle.isNotEmpty() && cleanTitle != "LiteTube" && cleanTitle != "YouTube") {
+            currentTitle = cleanTitle
+        }
+        if (channel.isNotBlank()) currentChannel = channel.trim()
+        if (posMs >= 0) positionMs = posMs
+        if (durMs > 0) durationMs = durMs
+
+        if (tvMiniPlayerTitle.text.toString() != currentTitle) tvMiniPlayerTitle.text = currentTitle
+        if (tvMiniPlayerChannel.text.toString() != currentChannel) tvMiniPlayerChannel.text = currentChannel
+        if (playingChanged || lastMiniIconPlaying != playing) {
+            lastMiniIconPlaying = playing
+            btnMiniPlayerPlayPause.setImageResource(
+                if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+            )
+        }
+        if (playingChanged) updatePipParams()
+        updateMediaService()
+    }
+
+    inner class MediaBridge(private val fromPlayer: Boolean) {
         @JavascriptInterface
         fun openWatchLayer(url: String) {
             if (url.isNotEmpty()) {
@@ -999,45 +1143,37 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        /**
+         * Chỉ nhận trạng thái media từ đúng WebView đang phát:
+         * - Khi lớp Player đang mở (EXPANDED/COLLAPSED): chỉ nhận từ playerWebView
+         * - Khi lớp Player ẩn: chỉ nhận từ webView (Browse, ví dụ Shorts)
+         * Tránh việc trang chủ liên tục báo "paused" + tiêu đề trang chủ đè lên video đang phát
+         * (nguyên nhân tên video nhảy lung tung và icon play/pause nhấp nháy trên MiniPlayer).
+         */
+        private fun acceptMedia(): Boolean =
+            if (panelState != PanelState.HIDDEN) fromPlayer else !fromPlayer
+
         @JavascriptInterface
         fun onVideoPlaying(title: String, channel: String) {
             runOnUiThread {
-                isVideoPlaying = true
-                if (title.isNotEmpty()) currentTitle = title
-                if (channel.isNotEmpty()) currentChannel = channel
-                tvMiniPlayerTitle.text = currentTitle
-                tvMiniPlayerChannel.text = currentChannel
-                btnMiniPlayerPlayPause.setImageResource(android.R.drawable.ic_media_pause)
-                updatePipParams()
-                updateMediaService(isPlaying = true)
+                if (!acceptMedia()) return@runOnUiThread
+                applyMediaState(true, title, channel, -1L, -1L)
             }
         }
 
         @JavascriptInterface
         fun onVideoPaused() {
             runOnUiThread {
-                isVideoPlaying = false
-                btnMiniPlayerPlayPause.setImageResource(android.R.drawable.ic_media_play)
-                updatePipParams()
-                updateMediaService(isPlaying = false)
+                if (!acceptMedia()) return@runOnUiThread
+                applyMediaState(false, "", "", -1L, -1L)
             }
         }
 
         @JavascriptInterface
         fun onMediaStateChanged(playing: Boolean, title: String, channel: String, posMs: Long, durMs: Long) {
             runOnUiThread {
-                isVideoPlaying = playing
-                if (title.isNotEmpty()) currentTitle = title
-                if (channel.isNotEmpty()) currentChannel = channel
-                if (posMs >= 0) positionMs = posMs
-                if (durMs > 0) durationMs = durMs
-                tvMiniPlayerTitle.text = currentTitle
-                tvMiniPlayerChannel.text = currentChannel
-                btnMiniPlayerPlayPause.setImageResource(
-                    if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-                )
-                updatePipParams()
-                updateMediaService()
+                if (!acceptMedia()) return@runOnUiThread
+                applyMediaState(playing, title, channel, posMs, durMs)
             }
         }
 
@@ -1045,6 +1181,7 @@ class MainActivity : AppCompatActivity() {
         fun onVideoSize(width: Int, height: Int) {
             if (width <= 0 || height <= 0) return
             runOnUiThread {
+                if (!acceptMedia()) return@runOnUiThread
                 val newRatio = Rational(width, height)
                 if (newRatio != videoAspectRatio) {
                     videoAspectRatio = newRatio

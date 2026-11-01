@@ -222,7 +222,66 @@
         try { window.dispatchEvent(new Event('resize')); } catch (e2) {}
     }
 
+    /**
+     * ĐỒNG BỘ TRẠNG THÁI NỘI BỘ CỦA YOUTUBE PLAYER VỚI THẺ <video> THẬT
+     *
+     * Nguyên nhân nút Play/Pause "chết" sau khi thoát popup / bung từ MiniPlayer:
+     * Khi ở popup nhỏ, YouTube tự gọi pause() (PLAYER_VIEW_TOO_SMALL) và đặt trạng thái nội bộ = PAUSED,
+     * nhưng lệnh pause đó bị scriptlet chặn nên video vẫn phát. Kết quả: YouTube nghĩ đang dừng,
+     * thẻ <video> lại đang phát → bấm nút của YouTube không có tác dụng (cho đến khi tua lại).
+     *
+     * Cách sửa (không seek, không pause/play giật cục): đọc getPlayerState() và gọi playVideo()/pauseVideo()
+     * của chính YouTube Player API để trạng thái nội bộ khớp với video thật.
+     */
+    function resyncPlayerState() {
+        try {
+            var v = mainVideo();
+            var p = getPlayer();
+            if (!v) return 'resync:no-video';
+            var actuallyPlaying = !v.paused && !v.ended;
+
+            if (p && typeof p.getPlayerState === 'function') {
+                var st = p.getPlayerState(); // 1 = PLAYING, 2 = PAUSED, 3 = BUFFERING
+                if (actuallyPlaying && st !== 1 && st !== 3) {
+                    if (typeof p.playVideo === 'function') p.playVideo();
+                } else if (!actuallyPlaying && (st === 1 || st === 3)) {
+                    window.__braveAllowPauseUntil = Date.now() + 800;
+                    if (typeof p.pauseVideo === 'function') p.pauseVideo();
+                }
+            } else {
+                // Fallback: bắn sự kiện media để YouTube cập nhật lại UI controls (không đụng tới currentTime)
+                try { v.dispatchEvent(new Event(actuallyPlaying ? 'playing' : 'pause')); } catch (e1) {}
+            }
+
+            if (p) {
+                if (typeof p.wakeUpControls === 'function') p.wakeUpControls();
+                if (typeof p.updateDimensions === 'function') p.updateDimensions();
+            }
+            return 'resync:' + (actuallyPlaying ? 'playing' : 'paused');
+        } catch (e) {
+            return 'resync:error';
+        }
+    }
+
+    // Ghi nhận thao tác chạm thật của người dùng lên trình phát:
+    // gỡ ngay cờ bảo vệ phát để nút Pause của YouTube luôn có hiệu lực (không tự can thiệp play/pause).
+    window.__braveLastUserTouch = 0;
+    ['touchstart', 'pointerdown', 'mousedown'].forEach(function(type) {
+        window.addEventListener(type, function(e) {
+            if (active) return;
+            var t = e.target;
+            if (!t || !t.closest) return;
+            if (t.closest('#movie_player, .html5-video-player, #player-container-id, #player, .player-container')) {
+                window.__braveLastUserTouch = Date.now();
+                window.__braveProtectPlayUntil = 0;
+                window.__bravePlayPendingUntil = 0;
+                window.__braveAllowPauseUntil = Date.now() + 1500;
+            }
+        }, true);
+    });
+
     function stopLoop() {
+        var wasActive = active;
         active = false;
         currentVideo = null;
         if (timer) {
@@ -237,22 +296,33 @@
 
         window.__braveEnteringPip = false;
         window.__bravePlayPendingUntil = 0;
-        window.__bravePipTransitionUntil = Date.now() + 2500;
+        window.__isUserExplicitPause = false;
+        window.__braveAllowPauseUntil = 0;
 
+        // Không thực sự ở PiP (ví dụ onResume gọi exit) → chỉ đồng bộ lại, KHÔNG ép phát video
+        if (!wasActive) {
+            window.__bravePipTransitionUntil = 0;
+            setTimeout(resyncPlayerState, 150);
+            notifyMediaState();
+            return 'pip:off(idle)';
+        }
+
+        window.__bravePipTransitionUntil = Date.now() + 2500;
+        var exitAt = Date.now();
         var v = mainVideo();
         // Nếu người dùng KHÔNG chủ động bấm pause trong PiP -> DUY TRÌ PHÁT KHI PHÓNG TO!
         if (!window.__braveUserPaused) {
-            // Bảo vệ phát trong 2.5 giây đầu: Chặn mọi lệnh auto-pause của YouTube khi resize/animate bung cửa sổ
-            window.__braveProtectPlayUntil = Date.now() + 2500;
+            // Bảo vệ phát ngắn trong lúc cửa sổ đang bung to (YouTube hay auto-pause khi resize)
+            window.__braveProtectPlayUntil = Date.now() + 1500;
             if (v) {
                 triggerNativePlay(v);
                 [80, 200, 450, 800].forEach(function(delay) {
                     setTimeout(function() {
-                        if (!window.__braveUserPaused) {
-                            var target = mainVideo() || v;
-                            if (target && target.paused) {
-                                triggerNativePlay(target);
-                            }
+                        // Người dùng đã chạm vào player sau khi thoát popup → tôn trọng thao tác của họ
+                        if (window.__braveUserPaused || window.__braveLastUserTouch > exitAt) return;
+                        var target = mainVideo() || v;
+                        if (target && target.paused) {
+                            triggerNativePlay(target);
                         }
                     }, delay);
                 });
@@ -261,21 +331,17 @@
             window.__braveProtectPlayUntil = 0;
         }
 
-        window.__isUserExplicitPause = false;
-        window.__braveAllowPauseUntil = 0;
-
-        // Triển khai Micro-Seek Re-render Kick: đánh thức bộ re-render của YouTube Player ngay khi gỡ PiP
         triggerMicroSeek();
-
-        // Dispatch chuỗi sự kiện resize và orientationchange sau [0, 80, 200, 450]ms
-        [0, 80, 200, 450].forEach(function(delay) {
+        [0, 120, 300].forEach(function(delay) {
             setTimeout(function() {
                 try { window.dispatchEvent(new Event('resize')); } catch (e) {}
-                try { window.dispatchEvent(new Event('orientationchange')); } catch (e) {}
-                if (delay === 80 || delay === 200) {
-                    triggerMicroSeek();
-                }
             }, delay);
+        });
+
+        // Đồng bộ lại trạng thái YouTube Player nhiều nhịp (sau khi cửa sổ đã ổn định kích thước
+        // và sau khi hết thời gian bảo vệ) → nút Play/Pause hoạt động bình thường trở lại
+        [350, 1000, 1700].forEach(function(delay) {
+            setTimeout(resyncPlayerState, delay);
         });
         notifyMediaState();
         return 'pip:off';
@@ -336,6 +402,11 @@
         window.__bravePlayPendingUntil = Date.now() + 1500;
 
         var v = mainVideo();
+        // Gọi qua YouTube Player API trước để trạng thái nội bộ của YouTube luôn khớp (nút Play/Pause không bị lệch)
+        try {
+            var apiPlayer = getPlayer();
+            if (!active && apiPlayer && typeof apiPlayer.playVideo === 'function') apiPlayer.playVideo();
+        } catch (eApi) {}
         if (v) {
             triggerNativePlay(v);
             // Kiểm tra lại sau 150ms và 400ms để thắng hoàn toàn cơ chế auto-pause (PLAYER_VIEW_TOO_SMALL) của YouTube
@@ -372,6 +443,13 @@
         window.__braveAllowPauseUntil = 0;
         window.__braveProtectPlayUntil = 0;
         window.__bravePlayPendingUntil = 0;
+        window.__braveAllowPauseUntil = Date.now() + 1000;
+
+        // Báo cho YouTube Player biết là đã dừng (giữ đồng bộ trạng thái nút Play/Pause của YouTube)
+        try {
+            var apiPlayer = getPlayer();
+            if (apiPlayer && typeof apiPlayer.pauseVideo === 'function') apiPlayer.pauseVideo();
+        } catch (eApi) {}
 
         var videos = Array.prototype.slice.call(document.querySelectorAll('video'));
         videos.forEach(function(v) {
@@ -548,6 +626,7 @@
         applySettings: applySettings,
         mainVideo: mainVideo,
         triggerMicroSeek: triggerMicroSeek,
+        resync: resyncPlayerState,
         isActive: function() { return active; }
     };
 
