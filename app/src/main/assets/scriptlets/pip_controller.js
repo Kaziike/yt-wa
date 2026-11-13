@@ -87,6 +87,7 @@
 
     var active = false;
     var forcedByNative = false;
+    var exitingUntil = 0;
     var timer = null;
     var currentVideo = null;
     var retryTimers = [];
@@ -95,6 +96,12 @@
         while (retryTimers.length > 0) {
             clearTimeout(retryTimers.pop());
         }
+    }
+
+    function scheduleRetry(fn, delay) {
+        var id = setTimeout(fn, delay);
+        retryTimers.push(id);
+        return id;
     }
 
     // Ưu tiên video đang phát, sau đó video có độ phân giải / kích thước lớn nhất
@@ -184,6 +191,8 @@
     }
 
     function enter() {
+        clearRetryTimers();
+        exitingUntil = 0;
         active = true;
         forcedByNative = true;
         window.__braveEnteringPip = true;
@@ -197,12 +206,11 @@
             if (v) {
                 triggerNativePlay(v);
                 [80, 200, 500, 900].forEach(function(delay) {
-                    setTimeout(function() {
-                        if (!window.__braveUserPaused) {
-                            var target = mainVideo() || v;
-                            if (target && target.paused) {
-                                triggerNativePlay(target);
-                            }
+                    scheduleRetry(function() {
+                        if (!active || window.__braveUserPaused) return;
+                        var target = mainVideo() || v;
+                        if (target && target.paused) {
+                            triggerNativePlay(target);
                         }
                     }, delay);
                 });
@@ -241,16 +249,38 @@
             var actuallyPlaying = !v.paused && !v.ended;
 
             if (p && typeof p.getPlayerState === 'function') {
-                var st = p.getPlayerState(); // 1 = PLAYING, 2 = PAUSED, 3 = BUFFERING
-                if (actuallyPlaying && st !== 1 && st !== 3) {
-                    if (typeof p.playVideo === 'function') p.playVideo();
-                } else if (!actuallyPlaying && (st === 1 || st === 3)) {
-                    window.__braveAllowPauseUntil = Date.now() + 800;
-                    if (typeof p.pauseVideo === 'function') p.pauseVideo();
+                var st = p.getPlayerState(); // -1 = UNSTARTED, 1 = PLAYING, 2 = PAUSED, 3 = BUFFERING
+                if (actuallyPlaying) {
+                    // Kể cả khi player bị kẹt ở BUFFERING (3) hay PAUSED (2):
+                    // Gọi playVideo() + bắn sự kiện 'canplay'/'playing' nếu thẻ <video> đã sẵn sàng dữ liệu
+                    // để tắt vòng xoay loading (ytp-spinner) và mở khoá nút Play/Pause của YouTube!
+                    if (st !== 1) {
+                        if (typeof p.playVideo === 'function') {
+                            try { p.playVideo(); } catch (ePlay) {}
+                        }
+                        if (v.readyState >= 2) {
+                            try {
+                                v.dispatchEvent(new Event('canplay'));
+                                v.dispatchEvent(new Event('play'));
+                                v.dispatchEvent(new Event('playing'));
+                            } catch (eEv) {}
+                        }
+                    }
+                } else {
+                    if (st === 1 || st === 3 || st === -1) {
+                        window.__braveAllowPauseUntil = Date.now() + 800;
+                        if (typeof p.pauseVideo === 'function') {
+                            try { p.pauseVideo(); } catch (ePause) {}
+                        }
+                        try { v.dispatchEvent(new Event('pause')); } catch (eEv2) {}
+                    }
                 }
             } else {
                 // Fallback: bắn sự kiện media để YouTube cập nhật lại UI controls (không đụng tới currentTime)
-                try { v.dispatchEvent(new Event(actuallyPlaying ? 'playing' : 'pause')); } catch (e1) {}
+                try {
+                    if (actuallyPlaying) v.dispatchEvent(new Event('canplay'));
+                    v.dispatchEvent(new Event(actuallyPlaying ? 'playing' : 'pause'));
+                } catch (e1) {}
             }
 
             if (p) {
@@ -271,7 +301,7 @@
             if (active) return;
             var t = e.target;
             if (!t || !t.closest) return;
-            if (t.closest('#movie_player, .html5-video-player, #player-container-id, #player, .player-container')) {
+            if (t.closest('#movie_player, .html5-video-player, #player-container-id, #player, .player-container, ytm-player, .player-controls-content, .player-controls-background-container')) {
                 window.__braveLastUserTouch = Date.now();
                 window.__braveProtectPlayUntil = 0;
                 window.__bravePlayPendingUntil = 0;
@@ -281,8 +311,10 @@
     });
 
     function stopLoop() {
+        clearRetryTimers();
         var wasActive = active;
         active = false;
+        exitingUntil = Date.now() + 1200;
         currentVideo = null;
         if (timer) {
             clearInterval(timer);
@@ -302,7 +334,7 @@
         // Không thực sự ở PiP (ví dụ onResume gọi exit) → chỉ đồng bộ lại, KHÔNG ép phát video
         if (!wasActive) {
             window.__bravePipTransitionUntil = 0;
-            setTimeout(resyncPlayerState, 150);
+            scheduleRetry(resyncPlayerState, 150);
             notifyMediaState();
             return 'pip:off(idle)';
         }
@@ -310,22 +342,38 @@
         window.__bravePipTransitionUntil = Date.now() + 2500;
         var exitAt = Date.now();
         var v = mainVideo();
+        var timeBeforeExit = (v && isFinite(v.currentTime)) ? v.currentTime : -1;
+
         // Nếu người dùng KHÔNG chủ động bấm pause trong PiP -> DUY TRÌ PHÁT KHI PHÓNG TO!
         if (!window.__braveUserPaused) {
             // Bảo vệ phát ngắn trong lúc cửa sổ đang bung to (YouTube hay auto-pause khi resize)
-            window.__braveProtectPlayUntil = Date.now() + 1500;
+            window.__braveProtectPlayUntil = Math.max(window.__braveProtectPlayUntil || 0, Date.now() + 1500);
             if (v) {
                 triggerNativePlay(v);
                 [80, 200, 450, 800].forEach(function(delay) {
-                    setTimeout(function() {
-                        // Người dùng đã chạm vào player sau khi thoát popup → tôn trọng thao tác của họ
-                        if (window.__braveUserPaused || window.__braveLastUserTouch > exitAt) return;
+                    scheduleRetry(function() {
+                        // Người dùng đã chạm vào player sau khi thoát popup hoặc vừa paused → tôn trọng
+                        if (active || window.__braveUserPaused || window.__braveLastUserTouch > exitAt) return;
                         var target = mainVideo() || v;
                         if (target && target.paused) {
                             triggerNativePlay(target);
                         }
                     }, delay);
                 });
+
+                // Phát hiện kẹt decoder phần cứng WebView sau khi đổi kích thước Surface từ PiP -> Full:
+                // chỉ thực hiện kick currentTime tại chỗ nếu khung hình đứng im thực sự (> 650ms không nhúc nhích)
+                scheduleRetry(function() {
+                    if (active || window.__braveUserPaused || window.__braveLastUserTouch > exitAt) return;
+                    var target = mainVideo() || v;
+                    if (target && !target.paused && !target.ended && timeBeforeExit >= 0 && isFinite(target.currentTime)) {
+                        if (Math.abs(target.currentTime - timeBeforeExit) < 0.05) {
+                            try { target.currentTime = target.currentTime; } catch (eSeek) {}
+                            triggerNativePlay(target);
+                        }
+                    }
+                    resyncPlayerState();
+                }, 650);
             }
         } else {
             window.__braveProtectPlayUntil = 0;
@@ -333,15 +381,15 @@
 
         triggerMicroSeek();
         [0, 120, 300].forEach(function(delay) {
-            setTimeout(function() {
+            scheduleRetry(function() {
                 try { window.dispatchEvent(new Event('resize')); } catch (e) {}
             }, delay);
         });
 
         // Đồng bộ lại trạng thái YouTube Player nhiều nhịp (sau khi cửa sổ đã ổn định kích thước
-        // và sau khi hết thời gian bảo vệ) → nút Play/Pause hoạt động bình thường trở lại
-        [350, 1000, 1700].forEach(function(delay) {
-            setTimeout(resyncPlayerState, delay);
+        // và sau khi hết thời gian bảo vệ) → nút Play/Pause & spinner hoạt động bình thường trở lại
+        [150, 400, 950, 1600].forEach(function(delay) {
+            scheduleRetry(resyncPlayerState, delay);
         });
         notifyMediaState();
         return 'pip:off';
@@ -365,7 +413,8 @@
             );
             var autoPipEnabled = !(window.__braveSettings && window.__braveSettings.autoPip === false);
             var isSmallPopup = !isTyping && h > 0 && h <= 280 && w > 0 && w <= 520;
-            if (isSmallPopup && mainVideo() && (forcedByNative || autoPipEnabled)) {
+            // Không tự bật lại PiP trong thời gian animation thoát PiP đang chạy (exitingUntil)
+            if (isSmallPopup && mainVideo() && Date.now() >= exitingUntil && (forcedByNative || autoPipEnabled)) {
                 if (!active) startLoop();
             } else if (!forcedByNative && active && h > 340) {
                 stopLoop();
@@ -475,19 +524,31 @@
     }
 
     function next() {
+        clearRetryTimers();
         window.__braveUserPaused = false;
         window.__isUserExplicitPause = false;
         window.__braveAllowPauseUntil = 0;
-        window.__braveProtectPlayUntil = Date.now() + 2500;
+        window.__braveProtectPlayUntil = Date.now() + 4500;
 
+        var curId = '';
+        try {
+            curId = new URL(window.location.href).searchParams.get('v') || '';
+        } catch (e) {}
+
+        // 1. Thử YouTube Player API (chỉ khi URL thực sự đổi sang video khác hoặc trong playlist)
         try {
             var player = getPlayer();
             if (player && typeof player.nextVideo === 'function') {
-                player.nextVideo();
-                return 'next:player-api';
+                var pd = (typeof player.getPlaylist === 'function') ? player.getPlaylist() : null;
+                if (Array.isArray(pd) && pd.length > 1) {
+                    player.nextVideo();
+                    scheduleRetry(notifyMediaState, 500);
+                    return 'next:player-api';
+                }
             }
         } catch (e) {}
 
+        // 2. Nút Next trên thanh điều khiển player
         var nextBtn = document.querySelector(
             '.ytp-next-button, button[aria-label*="Next" i], button[aria-label*="Tiếp theo" i], ' +
             '.player-control-next-icon, [aria-label*="Next video" i], [aria-label*="Video tiếp theo" i]'
@@ -495,20 +556,29 @@
         if (nextBtn) {
             try {
                 nextBtn.click();
+                scheduleRetry(notifyMediaState, 600);
                 return 'next:button';
             } catch (e) {}
         }
 
-        var nextLink = document.querySelector(
-            'ytm-WatchNextSecondaryResultsRenderer a[href*="/watch?v="], ' +
+        // 3. Thẻ gợi ý "Tiếp theo" bên dưới (lọc bỏ Shorts và bỏ qua chính video đang phát)
+        var candidates = document.querySelectorAll(
+            'ytm-watch-next-secondary-results-renderer a[href*="/watch?v="], ' +
             'ytm-item-section-renderer a[href*="/watch?v="], ' +
             'ytm-media-item a[href*="/watch?v="], ' +
             'ytm-video-with-context-renderer a[href*="/watch?v="], ' +
-            'ytm-compact-video-renderer a[href*="/watch?v="]'
+            'ytm-compact-video-renderer a[href*="/watch?v="], ' +
+            'a[href*="/watch?v="]'
         );
-        if (nextLink) {
+        for (var i = 0; i < candidates.length; i++) {
+            var a = candidates[i];
+            var href = a.getAttribute('href') || a.href || '';
+            if (!href || href.indexOf('/shorts/') !== -1) continue;
+            if (curId && href.indexOf('v=' + curId) !== -1) continue;
             try {
-                nextLink.click();
+                a.click();
+                scheduleRetry(notifyMediaState, 600);
+                scheduleRetry(notifyMediaState, 1400);
                 return 'next:link';
             } catch (e) {}
         }
@@ -595,11 +665,10 @@
                 window.__braveProtectPlayUntil = Date.now() + 1500;
             }
         } else if (!bg && !active) {
-            // Khi quay lại foreground full-app, mở khoá hoàn toàn các cờ pause
+            // Khi quay lại foreground full-app, mở khoá cờ bảo vệ để thao tác người dùng ăn ngay
             window.__braveProtectPlayUntil = 0;
             window.__bravePlayPendingUntil = 0;
             window.__bravePipTransitionUntil = 0;
-            window.__braveUserPaused = false;
             window.__isUserExplicitPause = false;
             window.__braveAllowPauseUntil = 0;
         }

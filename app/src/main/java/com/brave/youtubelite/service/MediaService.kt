@@ -8,8 +8,12 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
@@ -17,11 +21,16 @@ import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import com.brave.youtubelite.MainActivity
 import com.brave.youtubelite.R
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Foreground Service chuẩn Android Media Control:
  * - Tích hợp MediaSessionCompat để hỗ trợ điều khiển từ màn hình khóa, tai nghe Bluetooth, Android Auto.
  * - Hiển thị Notification chuẩn MediaStyle với các nút Prev, Play/Pause, Next.
+ * - Tải ảnh thumbnail của video (i.ytimg.com) làm ảnh bìa cho Notification / Màn hình khóa.
  * - Duy trì CPU WakeLock khi đang phát để âm thanh không bị ngắt khi tắt màn hình.
  */
 class MediaService : Service() {
@@ -36,6 +45,7 @@ class MediaService : Service() {
         const val EXTRA_IS_PLAYING = "EXTRA_IS_PLAYING"
         const val EXTRA_POSITION_MS = "EXTRA_POSITION_MS"
         const val EXTRA_DURATION_MS = "EXTRA_DURATION_MS"
+        const val EXTRA_VIDEO_ID = "EXTRA_VIDEO_ID"
 
         const val ACTION_MEDIA_PLAY = "com.brave.youtubelite.MEDIA_PLAY"
         const val ACTION_MEDIA_PAUSE = "com.brave.youtubelite.MEDIA_PAUSE"
@@ -49,18 +59,30 @@ class MediaService : Service() {
         private const val REQUEST_CODE_PREV = 2001
         private const val REQUEST_CODE_PLAY_PAUSE = 2002
         private const val REQUEST_CODE_NEXT = 2003
+
+        // Thứ tự ưu tiên ảnh thumbnail: 16:9 nét nhất trước, ảnh 4:3 có viền đen để cuối
+        private val THUMBNAIL_NAMES = listOf("maxresdefault", "hq720", "mqdefault", "hqdefault")
+        private const val THUMBNAIL_MAX_WIDTH = 640
     }
 
     private lateinit var mediaSession: MediaSessionCompat
     private var wakeLock: PowerManager.WakeLock? = null
     private var isForeground = false
-    private var isSessionReleased = false
+    private var isSessionReleased = true
 
     private var currentTitle = "LiteTube"
     private var currentChannel = "Đang phát âm thanh trong nền"
     private var isPlaying = true
     private var positionMs = 0L
     private var durationMs = -1L
+
+    // Ảnh bìa (thumbnail) của video đang phát
+    private var currentVideoId: String? = null
+    private var artBitmap: Bitmap? = null
+    private var artVideoId: String? = null
+    private var loadingArtVideoId: String? = null
+    private val artExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -73,7 +95,12 @@ class MediaService : Service() {
             PowerManager.PARTIAL_WAKE_LOCK,
             "LiteTube:PlaybackWakeLock"
         )
+        ensureMediaSession()
+    }
 
+    /** Tạo (hoặc tạo lại sau khi đã release) MediaSession. */
+    private fun ensureMediaSession() {
+        if (!isSessionReleased && ::mediaSession.isInitialized) return
         mediaSession = MediaSessionCompat(this, "LiteTubeMediaSession").apply {
             isActive = true
             setCallback(object : MediaSessionCompat.Callback() {
@@ -116,6 +143,7 @@ class MediaService : Service() {
                 }
             })
         }
+        isSessionReleased = false
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -124,6 +152,9 @@ class MediaService : Service() {
                 stopPlayback()
             }
             ACTION_START, ACTION_UPDATE -> {
+                // ACTION_UPDATE khi service đã dừng thì bỏ qua (tránh tự bật lại notification)
+                if (intent.action == ACTION_UPDATE && !isForeground) return START_NOT_STICKY
+                ensureMediaSession()
                 handlePlaybackIntent(intent)
             }
             ACTION_MEDIA_PLAY -> {
@@ -160,6 +191,11 @@ class MediaService : Service() {
         if (intent.hasExtra(EXTRA_DURATION_MS)) {
             durationMs = intent.getLongExtra(EXTRA_DURATION_MS, durationMs)
         }
+        val videoId = intent.getStringExtra(EXTRA_VIDEO_ID)
+        if (!videoId.isNullOrEmpty() && videoId != currentVideoId) {
+            currentVideoId = videoId
+            loadArtwork(videoId)
+        }
 
         if (isPlaying) {
             acquireWakeLock()
@@ -172,16 +208,69 @@ class MediaService : Service() {
         updateNotification()
     }
 
+    /** Ảnh bìa hợp lệ chỉ khi đúng video đang phát (tránh hiện ảnh của video trước). */
+    private fun currentArt(): Bitmap? =
+        if (artBitmap != null && artVideoId != null && artVideoId == currentVideoId) artBitmap else null
+
+    private fun loadArtwork(videoId: String) {
+        if (videoId == artVideoId || videoId == loadingArtVideoId) return
+        loadingArtVideoId = videoId
+        artExecutor.execute {
+            val bitmap = fetchThumbnail(videoId)
+            mainHandler.post {
+                if (loadingArtVideoId == videoId) loadingArtVideoId = null
+                if (bitmap == null || isSessionReleased) return@post
+                if (videoId != currentVideoId) return@post
+                artBitmap = bitmap
+                artVideoId = videoId
+                updateMetadata()
+                updateNotification()
+            }
+        }
+    }
+
+    private fun fetchThumbnail(videoId: String): Bitmap? {
+        for (name in THUMBNAIL_NAMES) {
+            var conn: HttpURLConnection? = null
+            try {
+                conn = (URL("https://i.ytimg.com/vi/$videoId/$name.jpg").openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5000
+                    readTimeout = 7000
+                    instanceFollowRedirects = true
+                }
+                if (conn.responseCode != HttpURLConnection.HTTP_OK) continue
+                val decoded = conn.inputStream.use { BitmapFactory.decodeStream(it) } ?: continue
+                // Ảnh 120x90 là ảnh "không tồn tại" mặc định của YouTube → bỏ qua
+                if (decoded.width <= 120) continue
+                return if (decoded.width > THUMBNAIL_MAX_WIDTH) {
+                    val h = (decoded.height * THUMBNAIL_MAX_WIDTH.toFloat() / decoded.width).toInt().coerceAtLeast(1)
+                    Bitmap.createScaledBitmap(decoded, THUMBNAIL_MAX_WIDTH, h, true)
+                } else {
+                    decoded
+                }
+            } catch (_: Exception) {
+                // thử ảnh kế tiếp
+            } finally {
+                conn?.disconnect()
+            }
+        }
+        return null
+    }
+
     private fun updateMetadata() {
         if (isSessionReleased) return
-        val metadata = MediaMetadataCompat.Builder()
+        val builder = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentChannel.ifEmpty { "LiteTube" })
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, currentTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, currentChannel.ifEmpty { "LiteTube" })
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, if (durationMs > 0) durationMs else -1L)
-            .build()
-        mediaSession.setMetadata(metadata)
+        currentArt()?.let { art ->
+            builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art)
+            builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
+            builder.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)
+        }
+        mediaSession.setMetadata(builder.build())
     }
 
     private fun updatePlaybackState() {
@@ -262,7 +351,7 @@ class MediaService : Service() {
             .setMediaSession(mediaSession.sessionToken)
             .setShowActionsInCompactView(0, 1, 2)
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(currentTitle)
             .setContentText(currentChannel.ifEmpty { "LiteTube" })
@@ -270,14 +359,17 @@ class MediaService : Service() {
             .setOngoing(isPlaying)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setOnlyAlertOnce(true)
             .addAction(prevAction)
             .addAction(playPauseAction)
             .addAction(nextAction)
             .setStyle(style)
-            .build()
+        currentArt()?.let { builder.setLargeIcon(it) }
+        return builder.build()
     }
 
     private fun updateNotification() {
+        if (isSessionReleased) return
         try {
             val notification = buildNotification()
             if (!isForeground) {
@@ -370,6 +462,7 @@ class MediaService : Service() {
 
     override fun onDestroy() {
         stopPlayback()
+        artExecutor.shutdownNow()
         super.onDestroy()
     }
 }

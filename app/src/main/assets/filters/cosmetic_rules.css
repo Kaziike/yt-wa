@@ -32,7 +32,12 @@ ytm-pivot-bar-item-renderer[aria-label*="Get app"],
 ytm-pivot-bar-item-renderer[aria-label*="Tải ứng dụng"],
 button[aria-label*="Mở ứng dụng"],
 button[aria-label*="Open App" i],
+button[aria-label*="Tải ứng dụng" i],
 a[aria-label*="Mở ứng dụng"],
+a[aria-label*="Open App" i],
+ytm-mobile-topbar-renderer a[href*="/redirect"],
+ytm-header-bar a[href*="/redirect"],
+[class*="open-app-button" i],
 ytm-upsell-dialog-renderer {
     display: none !important;
 }

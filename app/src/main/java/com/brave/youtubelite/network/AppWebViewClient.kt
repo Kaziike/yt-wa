@@ -32,6 +32,51 @@ open class AppWebViewClient(
     private var pipControllerCode: String = ""
     private var scriptletCode: String = ""
     private var injectCssJs: String = ""
+    private val injectPlayerUiCssJs: String = """
+        (function() {
+            try {
+                var styleId = '__brave_player_ui_style';
+                var css = [
+                    'html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer,',
+                    'html:not([data-brave-pip-mode]) ytm-header-bar,',
+                    'html:not([data-brave-pip-mode]) #header-bar,',
+                    'html:not([data-brave-pip-mode]) header.mobile-topbar-header,',
+                    'html:not([data-brave-pip-mode]) .mobile-topbar-header,',
+                    'html:not([data-brave-pip-mode]) .mobile-topbar-header-content {',
+                    '  display:none!important; visibility:hidden!important;',
+                    '  height:0!important; min-height:0!important; max-height:0!important;',
+                    '  margin:0!important; padding:0!important; border:0!important;',
+                    '  overflow:hidden!important; pointer-events:none!important;',
+                    '}',
+                    'html:not([data-brave-pip-mode]) #app,',
+                    'html:not([data-brave-pip-mode]) ytm-app,',
+                    'html:not([data-brave-pip-mode]) ytm-watch,',
+                    'html:not([data-brave-pip-mode]) .page-container,',
+                    'html:not([data-brave-pip-mode]) ytm-page-manager {',
+                    '  padding-top:0!important; margin-top:0!important;',
+                    '}',
+                    'html:not([data-brave-pip-mode]) #player-container-id,',
+                    'html:not([data-brave-pip-mode]) .player-container.sticky-player,',
+                    'html:not([data-brave-pip-mode]) .player-size {',
+                    '  top:0!important;',
+                    '}'
+                ].join('\n');
+                var style = document.getElementById(styleId);
+                if (!style) {
+                    style = document.createElement('style');
+                    style.id = styleId;
+                    style.type = 'text/css';
+                    style.textContent = css;
+                } else if (style.textContent !== css) {
+                    style.textContent = css;
+                }
+                var target = document.head || document.documentElement;
+                if (target && style.parentNode !== target) {
+                    target.appendChild(style);
+                }
+            } catch (e) {}
+        })();
+    """.trimIndent()
 
     private val browseWatchInterceptorJs: String = """
         (function() {
@@ -297,6 +342,9 @@ open class AppWebViewClient(
                 if (isBrowseMode && browseWatchInterceptorJs.isNotEmpty()) {
                     WebViewCompat.addDocumentStartJavaScript(webView, browseWatchInterceptorJs, origins)
                 }
+                if (!isBrowseMode && injectPlayerUiCssJs.isNotEmpty()) {
+                    WebViewCompat.addDocumentStartJavaScript(webView, injectPlayerUiCssJs, origins)
+                }
             }
         } catch (e: Exception) {
             Log.e(tag, "Không thể đăng ký document-start script: ${e.message}")
@@ -385,6 +433,9 @@ open class AppWebViewClient(
             "if (window.__bravePip && window.__bravePip.applySettings) window.__bravePip.applySettings($settingsJson); else window.__braveSettings = $settingsJson;",
             null
         )
+        if (!isBrowseMode && injectPlayerUiCssJs.isNotEmpty()) {
+            webView.evaluateJavascript(injectPlayerUiCssJs, null)
+        }
         if (AdBlockEngine.isEnabled && injectCssJs.isNotEmpty()) {
             webView.evaluateJavascript(injectCssJs, null)
         } else if (!AdBlockEngine.isEnabled) {

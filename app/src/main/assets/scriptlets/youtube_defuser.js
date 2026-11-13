@@ -280,9 +280,142 @@
     });
 
     // ==============================================================
-    // 5. ĐỒNG BỘ TRẠNG THÁI PHÁT & MEDIA METADATA VỚI ANDROID NATIVE
+    // 5. ĐỒNG BỘ TRẠNG THÁI PHÁT, AUTO-UNMUTE & MEDIA METADATA VỚI ANDROID NATIVE
     // ==============================================================
+    let lastAutoUnmuteKey = '';
+    let autoUnmuteWindowUntil = 0;
+    let userMutedVideo = false;
+
+    function extractVideoId() {
+        try {
+            const u = new URL(window.location.href);
+            const v = u.searchParams.get('v');
+            if (v) return v;
+            const m = window.location.pathname.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
+            if (m && m[1]) return m[1];
+        } catch (e) {}
+        try {
+            const pr = window.ytInitialPlayerResponse;
+            if (pr && pr.videoDetails && pr.videoDetails.videoId) {
+                return String(pr.videoDetails.videoId);
+            }
+        } catch (e) {}
+        try {
+            const p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+            if (p && typeof p.getVideoData === 'function') {
+                const vd = p.getVideoData();
+                if (vd && vd.video_id) return String(vd.video_id);
+            }
+        } catch (e) {}
+        return '';
+    }
+
+    function isElementVisible(el) {
+        if (!el) return false;
+        try {
+            if (el.offsetWidth <= 0 && el.offsetHeight <= 0) return false;
+            const st = window.getComputedStyle(el);
+            return st.display !== 'none' && st.visibility !== 'hidden' && st.opacity !== '0';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Ghi nhận nếu người dùng chủ động nhấn nút Mute trên UI player
+    ['touchstart', 'pointerdown', 'mousedown', 'click'].forEach(function(type) {
+        window.addEventListener(type, function(e) {
+            const t = e.target;
+            if (!t || !t.closest) return;
+            const muteBtn = t.closest('.ytp-mute-button');
+            if (muteBtn) {
+                const v = pickMainVideo();
+                if (v && !v.muted) {
+                    userMutedVideo = true;
+                } else if (v && v.muted) {
+                    userMutedVideo = false;
+                }
+            }
+        }, true);
+    });
+
+    function isAdShowingNow() {
+        if (document.querySelector('.ad-showing, .ad-interrupting')) return true;
+        const overlay = document.querySelector('[class*="ytp-ad-player-overlay"]');
+        return isElementVisible(overlay);
+    }
+
+    function tryAutoUnmute() {
+        try {
+            if (isAdPlaying || isAdShowingNow()) return;
+
+            const video = pickMainVideo();
+            if (!video) return;
+
+            const curVid = extractVideoId();
+            const key = (curVid || (location.pathname + location.search)) + '|' + (video.currentSrc || '');
+            if (key && key !== lastAutoUnmuteKey) {
+                lastAutoUnmuteKey = key;
+                autoUnmuteWindowUntil = Date.now() + 8000;
+                userMutedVideo = false;
+            }
+
+            if (userMutedVideo) return;
+
+            const candidates = document.querySelectorAll(
+                '.ytp-unmute, button.ytp-unmute, .ytm-unmute-button, button[class*="unmute" i], button[aria-label*="Tap to unmute" i], button[aria-label*="Bật tiếng" i]'
+            );
+            let visibleUnmuteBtn = null;
+            for (let i = 0; i < candidates.length; i++) {
+                const btn = candidates[i];
+                if (!btn.classList.contains('ytp-mute-button') && isElementVisible(btn)) {
+                    visibleUnmuteBtn = btn;
+                    break;
+                }
+            }
+
+            const inWindow = Date.now() < autoUnmuteWindowUntil;
+            if (!visibleUnmuteBtn && !inWindow) return;
+
+            const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+            if (visibleUnmuteBtn) {
+                try { visibleUnmuteBtn.click(); } catch (eClick) {}
+            }
+            if (player) {
+                try {
+                    if (typeof player.isMuted === 'function' && player.isMuted() && typeof player.unMute === 'function') {
+                        player.unMute();
+                    }
+                    if (typeof player.getVolume === 'function' && player.getVolume() === 0 && typeof player.setVolume === 'function') {
+                        player.setVolume(100);
+                    }
+                } catch (ePl) {}
+            }
+            if (video.muted) {
+                video.muted = false;
+            }
+            if (video.volume === 0) {
+                video.volume = 1.0;
+            }
+        } catch (e) {}
+    }
+
+    window.__braveTryAutoUnmute = tryAutoUnmute;
+
     function extractMetadata() {
+        const videoId = extractVideoId();
+        let apiTitle = '';
+        let apiAuthor = '';
+        try {
+            const p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+            if (p && typeof p.getVideoData === 'function') {
+                const vd = p.getVideoData();
+                if (vd && (!videoId || !vd.video_id || vd.video_id === videoId)) {
+                    if (vd.title) apiTitle = String(vd.title).trim();
+                    if (vd.author) apiAuthor = String(vd.author).trim();
+                }
+            }
+        } catch (e) {}
+
         const titleEl = document.querySelector(
             'h1.slim-video-metadata-title, .ytm-slim-video-metadata-renderer-title, .media-item-headline, .ytp-title-link'
         );
@@ -291,13 +424,26 @@
         );
         const rawTitle = titleEl && titleEl.innerText ? titleEl.innerText.trim() : '';
         const docTitle = document.title ? document.title.replace(/\s*-\s*YouTube$/i, '').trim() : '';
-        const title = rawTitle || docTitle || 'LiteTube';
-        const channel = channelEl && channelEl.innerText ? channelEl.innerText.trim() : '';
-        return { title: title, channel: channel };
+        const title = apiTitle || rawTitle || docTitle || 'LiteTube';
+        const channel = apiAuthor || (channelEl && channelEl.innerText ? channelEl.innerText.trim() : '');
+        return { videoId: videoId, title: title, channel: channel };
+    }
+
+    function reportMediaToBridge(isPlaying, meta, positionMs, durationMs) {
+        if (!window.AndroidBridge) return;
+        try {
+            if (typeof window.AndroidBridge.onMediaStateWithId === 'function') {
+                window.AndroidBridge.onMediaStateWithId(isPlaying, meta.videoId || '', meta.title, meta.channel, positionMs, durationMs);
+            } else if (typeof window.AndroidBridge.onMediaStateChanged === 'function') {
+                window.AndroidBridge.onMediaStateChanged(isPlaying, meta.title, meta.channel, positionMs, durationMs);
+            }
+        } catch (e) {}
     }
 
     function syncNativeState() {
         if (!window.AndroidBridge) return;
+
+        tryAutoUnmute();
 
         const video = pickMainVideo();
         if (video) reportVideoSize(video);
@@ -310,22 +456,14 @@
         if (isPlaying) {
             window.__braveUserPaused = false;
             try { window.AndroidBridge.onVideoPlaying(meta.title, meta.channel); } catch (e) {}
-            try {
-                if (typeof window.AndroidBridge.onMediaStateChanged === 'function') {
-                    window.AndroidBridge.onMediaStateChanged(true, meta.title, meta.channel, positionMs, durationMs);
-                }
-            } catch (e) {}
+            reportMediaToBridge(true, meta, positionMs, durationMs);
         } else {
             // Nếu vừa bấm Play trên PiP và video đang khởi chạy (Promise play chưa xong), không báo paused đè lên
             if (window.__bravePlayPendingUntil && Date.now() < window.__bravePlayPendingUntil) {
                 return;
             }
             try { window.AndroidBridge.onVideoPaused(); } catch (e) {}
-            try {
-                if (typeof window.AndroidBridge.onMediaStateChanged === 'function') {
-                    window.AndroidBridge.onMediaStateChanged(false, meta.title, meta.channel, positionMs, durationMs);
-                }
-            } catch (e) {}
+            reportMediaToBridge(false, meta, positionMs, durationMs);
         }
     }
 
@@ -335,6 +473,7 @@
         document.addEventListener(eventType, function(e) {
             if (e.target && e.target.tagName === 'VIDEO') {
                 window.__braveUserPaused = false;
+                tryAutoUnmute();
                 syncNativeState();
             }
         }, true);
@@ -343,10 +482,17 @@
     ['loadedmetadata', 'durationchange', 'seeked', 'ratechange'].forEach(function(eventType) {
         document.addEventListener(eventType, function(e) {
             if (e.target && e.target.tagName === 'VIDEO') {
+                tryAutoUnmute();
                 syncNativeState();
             }
         }, true);
     });
+
+    document.addEventListener('volumechange', function(e) {
+        if (e.target && e.target.tagName === 'VIDEO' && Date.now() < autoUnmuteWindowUntil && !userMutedVideo) {
+            tryAutoUnmute();
+        }
+    }, true);
 
     document.addEventListener('pause', function(e) {
         if (e.target && e.target.tagName === 'VIDEO') {
@@ -360,6 +506,11 @@
         }
     }, true);
 
+    setInterval(function() {
+        if (Date.now() < autoUnmuteWindowUntil && !userMutedVideo) {
+            tryAutoUnmute();
+        }
+    }, 250);
     setInterval(syncNativeState, 1000);
 
     console.log('[BraveShield] Đã kích hoạt toàn bộ tính năng!');
