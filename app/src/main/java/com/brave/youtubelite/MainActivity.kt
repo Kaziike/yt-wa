@@ -2,226 +2,296 @@ package com.brave.youtubelite
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.PendingIntent
-import android.app.PictureInPictureParams
-import android.app.RemoteAction
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
-import android.graphics.drawable.Icon
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
-import android.util.Rational
-import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
-import android.view.WindowManager
-import android.view.animation.DecelerateInterpolator
 import android.webkit.ConsoleMessage
-import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
-import android.widget.FrameLayout
-import android.widget.ImageButton
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import com.brave.youtubelite.databinding.ActivityMainBinding
 import com.brave.youtubelite.network.AdBlockEngine
 import com.brave.youtubelite.network.AppWebViewClient
+import com.brave.youtubelite.network.UrlUtils
+import com.brave.youtubelite.network.WebAssetRepository
 import com.brave.youtubelite.network.WebResourceCacheManager
-import com.brave.youtubelite.service.MediaService
+import com.brave.youtubelite.playback.PlaybackCoordinator
+import com.brave.youtubelite.playback.WebBridge
 import com.brave.youtubelite.settings.AppSettings
-import com.brave.youtubelite.view.KeepAliveWebView
-import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.switchmaterial.SwitchMaterial
+import com.brave.youtubelite.ui.FullscreenController
+import com.brave.youtubelite.ui.PipController
+import com.brave.youtubelite.ui.PlayerSheetController
+import com.brave.youtubelite.ui.SettingsBottomSheet
 
-class MainActivity : AppCompatActivity() {
+/**
+ * MainActivity tinh gọn (~240 dòng):
+ * Chỉ đảm nhiệm điều phối vòng đời Activity, kết nối các Controller chuyên biệt,
+ * xử lý Deep Link singleTask (onNewIntent) và dọn dẹp tài nguyên chống rò rỉ bộ nhớ.
+ */
+class MainActivity : AppCompatActivity(), WebBridge.Listener {
 
     companion object {
-        private const val ACTION_PIP_PLAY = "com.brave.youtubelite.PIP_PLAY"
-        private const val ACTION_PIP_PAUSE = "com.brave.youtubelite.PIP_PAUSE"
-        private const val ACTION_PIP_HEADPHONES = "com.brave.youtubelite.PIP_HEADPHONES"
-        private const val TAG = "MainActivity"
+        private const val HOME_URL = "https://m.youtube.com"
+        private const val BRIDGE_NAME = "AndroidBridge"
         private const val WEB_LOG_TAG = "WebConsole"
-
-        // Đo khung player thật trong trang (CSS px): "left,top,width,height,innerWidth"
-        private const val VIDEO_RECT_JS = "(function(){try{" +
-            "var el=document.getElementById('movie_player')||document.querySelector('.html5-video-player');" +
-            "var v=(window.__bravePip&&window.__bravePip.mainVideo&&window.__bravePip.mainVideo())||document.querySelector('video');" +
-            "var r=el?el.getBoundingClientRect():null;" +
-            "if((!r||r.width<20||r.height<20)&&v){r=v.getBoundingClientRect();}" +
-            "if(!r)return '';" +
-            "return [r.left,r.top,r.width,r.height,window.innerWidth].join(',');" +
-            "}catch(e){return '';}})()"
+        private const val REQ_POST_NOTIFICATIONS = 101
     }
 
-    enum class PanelState {
-        HIDDEN, EXPANDED, COLLAPSED
+    private lateinit var binding: ActivityMainBinding
+    private lateinit var browseClient: AppWebViewClient
+    private lateinit var playerClient: AppWebViewClient
+    private lateinit var browseBridge: WebBridge
+    private lateinit var playerBridge: WebBridge
+
+    private lateinit var playerSheet: PlayerSheetController
+    private lateinit var fullscreenController: FullscreenController
+    private lateinit var playbackCoordinator: PlaybackCoordinator
+    private lateinit var pipController: PipController
+
+    private var browseHomeLoaded = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        AdBlockEngine.isEnabled = AppSettings.isAdBlockEnabled(this)
+        WebResourceCacheManager.isEnabled = AppSettings.isPreloadCacheEnabled(this)
+        AdBlockEngine.init(applicationContext)
+        WebAssetRepository.init(applicationContext)
+        WebResourceCacheManager.init(applicationContext)
+
+        requestNotificationPermission()
+        setupControllers()
+        setupSwipeRefresh()
+        setupBrowseWebView()
+        setupPlayerWebView()
+        setupBackNavigation()
+
+        handleIncomingIntent(intent, isInitialLaunch = true)
     }
 
-    // Mã JS điều khiển PiP (assets/scriptlets/pip_controller.js), chèn trực tiếp khi cần
-    private var pipControllerJs: String = ""
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent, isInitialLaunch = false)
+    }
 
-    // TẦNG DƯỚI: Browse WebView (Trang chủ, Kênh, Tìm kiếm, Đăng ký...)
-    private lateinit var mainContainer: FrameLayout
-    private lateinit var webView: KeepAliveWebView
-    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
-    private lateinit var progressBar: ProgressBar
-    private lateinit var customViewContainer: FrameLayout
+    private fun setupControllers() {
+        playerSheet = PlayerSheetController(
+            binding = binding,
+            resources = resources,
+            onRequestTogglePlayPause = { playbackCoordinator.togglePlayPause() },
+            onRequestResync = { playbackCoordinator.runPipCommand("resync()") },
+            onPlayerClosed = {
+                playbackCoordinator.resetOnPlayerClosed()
+                pipController.updateParams()
+            }
+        )
 
-    // TẦNG TRÊN: Lớp phát Video trượt đè lên (Sliding Video Player Layer)
-    private lateinit var playerPanel: FrameLayout
-    private lateinit var playerWebView: KeepAliveWebView
-    private lateinit var playerDragArea: View
-    private lateinit var btnMinimizePlayer: ImageButton
-    private lateinit var miniPlayerBar: LinearLayout
-    private lateinit var miniPlayerInfoContainer: LinearLayout
-    private lateinit var tvMiniPlayerTitle: TextView
-    private lateinit var tvMiniPlayerChannel: TextView
-    private lateinit var btnMiniPlayerPlayPause: ImageButton
-    private lateinit var btnMiniPlayerClose: ImageButton
+        fullscreenController = FullscreenController(
+            activity = this,
+            binding = binding,
+            isPlayerPanelVisible = { playerSheet.isVisible },
+            isInPipMode = { pipController.isInPipMode() },
+            onFullscreenChanged = { pipController.updateParams() }
+        )
 
-    private var customView: View? = null
-    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
-    private var isFullscreen = false
+        playbackCoordinator = PlaybackCoordinator(
+            context = this,
+            browseWebView = binding.webView,
+            playerWebView = binding.playerWebView,
+            isPlayerLayerActive = { playerSheet.isVisible },
+            isInPipMode = { pipController.isInPipMode() },
+            onStateChanged = { state, shouldUpdatePip ->
+                playerSheet.applyPlaybackState(state)
+                if (shouldUpdatePip) {
+                    pipController.updateParams()
+                }
+            }
+        )
 
-    private var panelState = PanelState.HIDDEN
-    private var wasCollapsedBeforePip = false
-    private val bottomNavHeightDp = 48f
-    private var lastMiniIconPlaying: Boolean? = null
-    private var isVideoPlaying = false
-    private var currentVideoId = ""
-    private var currentTitle = "LiteTube"
-    private var currentChannel = ""
-    private var positionMs: Long = 0L
-    private var durationMs: Long = -1L
-    private var isMediaServiceActive = false
+        pipController = PipController(
+            activity = this,
+            playerSheet = playerSheet,
+            fullscreenController = fullscreenController,
+            playback = playbackCoordinator
+        )
+        pipController.register()
+    }
 
-    private var wasInPipMode = false
-    private var isInPipLayout = false
-    private var isHidingPipToAudio = false
-    private var hidingPipToAudioAtMs = 0L
-    private val pipHandler = Handler(Looper.getMainLooper())
-    private val pendingPipEnterRunnables = mutableListOf<Runnable>()
-    private val pendingCollapseRunnable = Runnable {
-        if (panelState == PanelState.EXPANDED && !isInPipModeCompat() && !isFullscreen) {
-            collapsePlayer()
+    private fun setupSwipeRefresh() {
+        binding.swipeRefreshLayout.setProgressBackgroundColorSchemeColor(Color.parseColor("#212121"))
+        binding.swipeRefreshLayout.setColorSchemeColors(
+            Color.parseColor("#FF0000"),
+            Color.parseColor("#FF5722")
+        )
+        binding.swipeRefreshLayout.setOnRefreshListener {
+            binding.webView.reload()
+        }
+        binding.swipeRefreshLayout.setOnChildScrollUpCallback { _, _ ->
+            binding.webView.scrollY > 0
         }
     }
 
-    // Tỉ lệ khung hình thật của video (cập nhật từ JS) để cửa sổ PiP khớp video
-    private var videoAspectRatio = Rational(16, 9)
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun configureWebSettings(view: WebView) {
+        view.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            allowFileAccess = false
+            allowContentAccess = false
+            cacheMode = WebSettings.LOAD_DEFAULT
+            mediaPlaybackRequiresUserGesture = false
+            offscreenPreRaster = false
+            userAgentString = userAgentString.replace("; wv", "")
+        }
+        view.setLayerType(View.LAYER_TYPE_NONE, null)
+        view.isFocusable = true
+        view.isFocusableInTouchMode = true
+    }
 
-    // Receiver lắng nghe các nút trên PiP (Tai nghe / Play-Pause / Next) và MediaService / Notification
-    private val mediaActionReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                ACTION_PIP_HEADPHONES -> handlePipHeadphones()
-                ACTION_PIP_PLAY, MediaService.ACTION_MEDIA_PLAY -> handlePipPlay()
-                ACTION_PIP_PAUSE, MediaService.ACTION_MEDIA_PAUSE -> handlePipPause()
-                MediaService.ACTION_MEDIA_NEXT -> runPipCommand("next")
-                MediaService.ACTION_MEDIA_PREV -> runPipCommand("previous")
-                MediaService.ACTION_MEDIA_SEEK -> {
-                    val pos = intent.getLongExtra(MediaService.EXTRA_SEEK_POS_MS, 0L)
-                    runPipCommand("seekTo($pos)")
+    private fun setupBrowseWebView() {
+        configureWebSettings(binding.webView)
+        browseBridge = WebBridge(fromPlayer = false, listener = this)
+        binding.webView.addJavascriptInterface(browseBridge, BRIDGE_NAME)
+
+        browseClient = AppWebViewClient(applicationContext, isBrowseMode = true).apply {
+            onInterceptWatchUrl = { normalizedWatchUrl ->
+                openWatchVideo(normalizedWatchUrl)
+                true
+            }
+            onPageFinishedCallback = {
+                runOnUiThread { binding.swipeRefreshLayout.isRefreshing = false }
+            }
+        }
+        browseClient.installDocumentStartScripts(binding.webView)
+        binding.webView.webViewClient = browseClient
+
+        binding.webView.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                if (newProgress < 100 && !pipController.isInPipMode()) {
+                    binding.progressBar.visibility = View.VISIBLE
+                    binding.progressBar.progress = newProgress
+                } else {
+                    binding.progressBar.visibility = View.GONE
+                    binding.swipeRefreshLayout.isRefreshing = false
                 }
+            }
+
+            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                fullscreenController.enter(view, callback)
+            }
+
+            override fun onHideCustomView() {
+                fullscreenController.exit()
             }
         }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+    private fun setupPlayerWebView() {
+        configureWebSettings(binding.playerWebView)
+        playerBridge = WebBridge(fromPlayer = true, listener = this)
+        binding.playerWebView.addJavascriptInterface(playerBridge, BRIDGE_NAME)
 
-        // Đồng bộ cài đặt ban đầu vào Engine
-        AdBlockEngine.isEnabled = AppSettings.isAdBlockEnabled(this)
-        WebResourceCacheManager.isEnabled = AppSettings.isPreloadCacheEnabled(this)
+        playerClient = AppWebViewClient(applicationContext, isBrowseMode = false)
+        playerClient.installDocumentStartScripts(binding.playerWebView)
+        binding.playerWebView.webViewClient = playerClient
 
-        val filter = IntentFilter().apply {
-            addAction(ACTION_PIP_HEADPHONES)
-            addAction(ACTION_PIP_PLAY)
-            addAction(ACTION_PIP_PAUSE)
-            addAction(MediaService.ACTION_MEDIA_PLAY)
-            addAction(MediaService.ACTION_MEDIA_PAUSE)
-            addAction(MediaService.ACTION_MEDIA_NEXT)
-            addAction(MediaService.ACTION_MEDIA_PREV)
-            addAction(MediaService.ACTION_MEDIA_SEEK)
+        binding.playerWebView.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                consoleMessage?.let {
+                    Log.d(WEB_LOG_TAG, "${it.message()} [${it.sourceId()}:${it.lineNumber()}]")
+                }
+                return true
+            }
+
+            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                fullscreenController.enter(view, callback)
+            }
+
+            override fun onHideCustomView() {
+                fullscreenController.exit()
+            }
         }
-        // Dùng RECEIVER_EXPORTED để nhận PendingIntent từ SystemUI (PiP & Notification)
-        ContextCompat.registerReceiver(
-            this,
-            mediaActionReceiver,
-            filter,
-            ContextCompat.RECEIVER_EXPORTED
-        )
-
-        requestNotificationPermission()
-
-        AdBlockEngine.init(applicationContext)
-
-        pipControllerJs = try {
-            assets.open("scriptlets/pip_controller.js").bufferedReader().use { it.readText() }
-        } catch (e: Exception) {
-            Log.e(TAG, "Không đọc được pip_controller.js: ${e.message}")
-            ""
-        }
-
-        initViews()
-        setupBrowseWebView()
-        setupPlayerWebView()
-        setupPlayerGestures()
-        setupBackPressedHandler()
-
-        val targetUrl = intent?.dataString ?: "https://m.youtube.com"
-        webView.loadUrl(targetUrl)
     }
 
-    private fun initViews() {
-        mainContainer = findViewById(R.id.mainContainer)
-        webView = findViewById(R.id.webView)
-        progressBar = findViewById(R.id.progressBar)
-        customViewContainer = findViewById(R.id.customViewContainer)
-        swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout)
+    /**
+     * Điều phối thông minh URL từ Intent / Deep Link:
+     * - Luôn giữ trang chủ YouTube ở Browse WebView tầng dưới.
+     * - Nếu link đầu vào là video (/watch hoặc youtu.be), mở thẳng trên lớp Player nổi để giữ trọn tính năng MiniPlayer!
+     */
+    private fun handleIncomingIntent(incomingIntent: Intent?, isInitialLaunch: Boolean) {
+        val rawUrl = incomingIntent?.dataString
+        val watchUrl = UrlUtils.normalizeWatchUrl(rawUrl)
 
-        playerPanel = findViewById(R.id.playerPanel)
-        playerWebView = findViewById(R.id.playerWebView)
-        playerDragArea = findViewById(R.id.playerDragArea)
-        btnMinimizePlayer = findViewById(R.id.btnMinimizePlayer)
-        miniPlayerBar = findViewById(R.id.miniPlayerBar)
-        miniPlayerInfoContainer = findViewById(R.id.miniPlayerInfoContainer)
-        tvMiniPlayerTitle = findViewById(R.id.tvMiniPlayerTitle)
-        tvMiniPlayerChannel = findViewById(R.id.tvMiniPlayerChannel)
-        btnMiniPlayerPlayPause = findViewById(R.id.btnMiniPlayerPlayPause)
-        btnMiniPlayerClose = findViewById(R.id.btnMiniPlayerClose)
+        if (watchUrl != null) {
+            if (!browseHomeLoaded) {
+                browseHomeLoaded = true
+                binding.webView.loadUrl(HOME_URL)
+            }
+            openWatchVideo(watchUrl)
+            return
+        }
 
-        swipeRefreshLayout.setProgressBackgroundColorSchemeColor(Color.parseColor("#212121"))
-        swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#FF0000"), Color.parseColor("#FF5722"))
-        swipeRefreshLayout.setOnRefreshListener {
-            webView.reload()
+        val parsed = UrlUtils.parseHttpUrl(rawUrl)
+        if (parsed != null && UrlUtils.isYouTubeHost(parsed.host)) {
+            browseHomeLoaded = true
+            if (playerSheet.state == PlayerSheetController.PanelState.EXPANDED) {
+                playerSheet.collapse()
+            }
+            binding.webView.loadUrl(rawUrl!!)
+        } else if (isInitialLaunch && !browseHomeLoaded) {
+            browseHomeLoaded = true
+            binding.webView.loadUrl(HOME_URL)
         }
-        swipeRefreshLayout.setOnChildScrollUpCallback { _, _ ->
-            webView.scrollY > 0
+    }
+
+    private fun openWatchVideo(rawOrNormalizedUrl: String) {
+        val safeWatchUrl = UrlUtils.normalizeWatchUrl(rawOrNormalizedUrl) ?: return
+        runOnUiThread {
+            if (fullscreenController.isFullscreen) {
+                fullscreenController.exit()
+            }
+            playbackCoordinator.resetForNewVideo(safeWatchUrl)
+            playerSheet.open(safeWatchUrl)
         }
+    }
+
+    private fun setupBackNavigation() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    fullscreenController.isFullscreen -> fullscreenController.exit()
+                    playerSheet.state == PlayerSheetController.PanelState.EXPANDED -> playerSheet.collapse()
+                    playerSheet.state == PlayerSheetController.PanelState.COLLAPSED -> playerSheet.close()
+                    binding.webView.canGoBack() -> binding.webView.goBack()
+                    else -> {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            }
+        })
+    }
+
+    private fun syncAllSettingsToWeb() {
+        browseClient.updateSettingsBootstrap(binding.webView)
+        playerClient.updateSettingsBootstrap(binding.playerWebView)
+        browseClient.syncRuntimeSettingsAndStyles(binding.webView)
+        playerClient.syncRuntimeSettingsAndStyles(binding.playerWebView)
+        playbackCoordinator.syncWebViewKeepAlive()
+        pipController.updateParams()
     }
 
     private fun requestNotificationPermission() {
@@ -232,950 +302,76 @@ class MainActivity : AppCompatActivity() {
                 ActivityCompat.requestPermissions(
                     this,
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    101
+                    REQ_POST_NOTIFICATIONS
                 )
             }
         }
     }
 
-    private fun configureWebSettings(view: WebView) {
-        val settings = view.settings
-        settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            allowFileAccess = false
-            allowContentAccess = false
-
-            setCacheMode(WebSettings.LOAD_DEFAULT)
-            mediaPlaybackRequiresUserGesture = false
-            offscreenPreRaster = false
-
-            userAgentString = settings.userAgentString.replace("; wv", "")
-        }
-        view.setLayerType(View.LAYER_TYPE_NONE, null)
-        view.isFocusable = true
-        view.isFocusableInTouchMode = true
+    // ==============================================================
+    // WebBridge.Listener callbacks (chuyển về UI Thread an toàn)
+    // ==============================================================
+    override fun onOpenWatchLayer(rawUrl: String) {
+        openWatchVideo(rawUrl)
     }
 
-    /**
-     * 1. Cấu hình Browse WebView (Tầng dưới): Chuyên duyệt Trang chủ, Kênh, Tìm kiếm...
-     * Khi bấm vào video thông thường (/watch?v=...): Chặn lại và mở bằng Player Layer đè lên!
-     */
-    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
-    private fun setupBrowseWebView() {
-        configureWebSettings(webView)
-
-        webView.addJavascriptInterface(MediaBridge(fromPlayer = false), "AndroidBridge")
-        val browseClient = AppWebViewClient(applicationContext, isBrowseMode = true).apply {
-            onInterceptWatchUrl = { url ->
-                // Nếu bấm vào video thông thường (/watch?v=... trừ Shorts): Mở lớp phát đè lên!
-                if (url.contains("/watch") && !url.contains("/shorts/")) {
-                    openVideoPlayer(url)
-                    true // Giữ nguyên trang chủ bên dưới!
-                } else {
-                    false
-                }
-            }
-            onPageFinishedCallback = {
-                runOnUiThread {
-                    swipeRefreshLayout.isRefreshing = false
-                }
-            }
-        }
-        browseClient.installDocumentStartScripts(webView)
-        webView.webViewClient = browseClient
-
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                if (newProgress < 100) {
-                    progressBar.visibility = View.VISIBLE
-                    progressBar.progress = newProgress
-                } else {
-                    progressBar.visibility = View.GONE
-                    swipeRefreshLayout.isRefreshing = false
-                }
-            }
-        }
-    }
-
-    /**
-     * 2. Cấu hình Player WebView (Tầng trên): Chuyên dụng phát Video & xử lý PiP
-     */
-    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
-    private fun setupPlayerWebView() {
-        configureWebSettings(playerWebView)
-
-        playerWebView.addJavascriptInterface(MediaBridge(fromPlayer = true), "AndroidBridge")
-        val playerClient = AppWebViewClient(applicationContext, isBrowseMode = false)
-        playerClient.installDocumentStartScripts(playerWebView)
-        playerWebView.webViewClient = playerClient
-
-        playerWebView.webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
-                consoleMessage?.let {
-                    Log.d(WEB_LOG_TAG, "${it.message()} [${it.sourceId()}:${it.lineNumber()}]")
-                }
-                return true
-            }
-
-            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                enterFullscreen(view, callback)
-            }
-
-            override fun onHideCustomView() {
-                exitFullscreen()
-            }
-        }
-    }
-
-    /**
-     * Cài đặt cử chỉ vuốt kéo mượt mà cho Player Layer
-     */
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupPlayerGestures() {
-        // Nút mũi tên chúc xuống: Thu nhỏ player
-        btnMinimizePlayer.setOnClickListener {
-            collapsePlayer()
-        }
-
-        // Kéo vuốt trên dải mép trên video để thu nhỏ (Swipe Down)
-        var startY = 0f
-        var isDragging = false
-        playerDragArea.setOnTouchListener { _, event ->
-            if (panelState != PanelState.EXPANDED) return@setOnTouchListener false
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    startY = event.rawY
-                    isDragging = false
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val deltaY = event.rawY - startY
-                    if (deltaY > dpToPx(12f) || isDragging) {
-                        isDragging = true
-                        if (deltaY > 0) {
-                            playerPanel.translationY = deltaY
-                        }
-                    }
-                    isDragging
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (isDragging) {
-                        val deltaY = event.rawY - startY
-                        if (deltaY > dpToPx(80f)) {
-                            collapsePlayer()
-                        } else {
-                            expandPlayer()
-                        }
-                        isDragging = false
-                        true
-                    } else {
-                        // Click nhẹ vào vùng dải trên cùng: thu nhỏ player
-                        collapsePlayer()
-                        true
-                    }
-                }
-                else -> false
-            }
-        }
-
-        // Chạm hoặc vuốt lên từ thanh MiniPlayer để bung to lại
-        var miniStartY = 0f
-        miniPlayerBar.setOnTouchListener { _, event ->
-            if (panelState != PanelState.COLLAPSED) return@setOnTouchListener false
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    miniStartY = event.rawY
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val deltaY = event.rawY - miniStartY
-                    if (deltaY < -dpToPx(20f)) {
-                        expandPlayer()
-                        true
-                    } else false
-                }
-                MotionEvent.ACTION_UP -> {
-                    expandPlayer()
-                    true
-                }
-                else -> false
-            }
-        }
-
-        miniPlayerInfoContainer.setOnClickListener {
-            expandPlayer()
-        }
-
-        // Nút Play/Pause trên MiniPlayer Bar
-        btnMiniPlayerPlayPause.setOnClickListener {
-            runPipCommand("toggle")
-        }
-
-        // Nút Đóng [X] trên MiniPlayer Bar
-        btnMiniPlayerClose.setOnClickListener {
-            closePlayer()
-        }
-    }
-
-    /**
-     * Mở một video mới đè lên trang hiện tại:
-     * Tự động bung to lên toàn màn hình (EXPANDED), trang chủ bên dưới giữ nguyên vẹn 100%!
-     */
-    fun openVideoPlayer(url: String) {
-        if (url.isEmpty()) return
+    override fun onOpenSettings() {
         runOnUiThread {
-            panelState = PanelState.EXPANDED
-
-            val params = playerPanel.layoutParams as FrameLayout.LayoutParams
-            params.height = ViewGroup.LayoutParams.MATCH_PARENT
-            params.gravity = Gravity.TOP
-            params.bottomMargin = 0
-            playerPanel.layoutParams = params
-            playerPanel.setBackgroundColor(Color.BLACK)
-
-            playerPanel.animate().cancel()
-            playerPanel.visibility = View.VISIBLE
-            playerPanel.translationY = 0f
-
-            resetPlayerWebViewTransform()
-            unlockPlayerWebViewSize()
-
-            // Reset thông tin MiniPlayer cho video mới
-            val fullUrl = if (url.startsWith("http://") || url.startsWith("https://")) {
-                url
-            } else {
-                "https://m.youtube.com" + (if (url.startsWith("/")) "" else "/") + url
-            }
-            currentVideoId = extractVideoIdFromUrl(fullUrl)
-            currentTitle = "LiteTube"
-            currentChannel = ""
-            positionMs = 0L
-            durationMs = -1L
-            tvMiniPlayerTitle.text = currentTitle
-            tvMiniPlayerChannel.text = currentChannel
-
-            miniPlayerBar.visibility = View.GONE
-            btnMinimizePlayer.visibility = View.VISIBLE
-            playerDragArea.visibility = View.VISIBLE
-
-            playerWebView.loadUrl(fullUrl)
-        }
-    }
-
-    /**
-     * Thu nhỏ lớp xem video xuống thanh MiniPlayer ở đáy màn hình (COLLAPSED)
-     * Đặt MiniPlayer nằm ngay trên thanh Bottom Navigation Bar (Tablist cao 48dp) của YouTube
-     */
-    fun collapsePlayer() {
-        if (panelState == PanelState.COLLAPSED || panelState == PanelState.HIDDEN) return
-        panelState = PanelState.COLLAPSED
-
-        val fullW = mainContainer.width
-        val fullH = mainContainer.height
-
-        // QUAN TRỌNG: Khóa cứng kích thước playerWebView bằng toàn màn hình.
-        // Nếu để MATCH_PARENT, khi panel co về 64dp thì WebView cũng co theo → viewport web chỉ còn ~64px
-        // → YouTube tưởng đang ở popup nhỏ (tự bật CSS PiP, auto-pause bị chặn, lệch trạng thái nút Play/Pause)
-        // và video hiển thị sai kích thước.
-        lockPlayerWebViewSize(fullW, fullH)
-
-        miniPlayerBar.visibility = View.VISIBLE
-        miniPlayerBar.alpha = 1f
-        btnMinimizePlayer.visibility = View.GONE
-        playerDragArea.visibility = View.GONE
-
-        // Đo vị trí thật của khung video trong trang để thu nhỏ chính xác vào ô 104x58dp
-        playerWebView.evaluateJavascript(VIDEO_RECT_JS) { result ->
-            if (panelState != PanelState.COLLAPSED) return@evaluateJavascript
-            animateToMini(fullW, fullH, parseVideoRect(result))
-        }
-    }
-
-    /** Tính toán & chạy animation thu nhỏ khung video vào ô MiniPlayer. */
-    private fun animateToMini(fullW: Int, fullH: Int, rect: FloatArray?) {
-        val bottomNavH = dpToPx(bottomNavHeightDp)
-        val miniH = dpToPx(64f)
-        val boxW = dpToPx(104f)
-        val boxH = dpToPx(58f)
-        val boxLeft = dpToPx(4f)
-        val targetY = (fullH - bottomNavH - miniH).coerceAtLeast(0f)
-
-        // Mặc định: player nằm sát đỉnh trang, rộng full màn hình, tỉ lệ 16:9
-        var vLeft = 0f
-        var vTop = 0f
-        var vW = fullW.toFloat().coerceAtLeast(1f)
-        var vH = vW * 9f / 16f
-        if (rect != null) {
-            // rect = [left, top, width, height, innerWidth] theo CSS px → đổi sang pixel View
-            val ratio = if (rect[4] > 0f) fullW / rect[4] else resources.displayMetrics.density
-            vLeft = rect[0] * ratio
-            vTop = rect[1] * ratio
-            vW = (rect[2] * ratio).coerceAtLeast(1f)
-            vH = (rect[3] * ratio).coerceAtLeast(1f)
-        }
-
-        val scale = minOf(boxW / vW, boxH / vH)
-        val tx = boxLeft + (boxW - vW * scale) / 2f - vLeft * scale
-        val ty = (miniH - vH * scale) / 2f - vTop * scale
-
-        playerPanel.animate()
-            .translationY(targetY)
-            .setDuration(260)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                if (panelState != PanelState.COLLAPSED) return@withEndAction
-                // Thu gọn panel xuống 64dp ngay trên Bottom Navigation Bar (48dp) → tablist không bị che,
-                // trang chủ phía trên tự do nhận touch. WebView vẫn giữ kích thước full nên không bị relayout.
-                val params = playerPanel.layoutParams as FrameLayout.LayoutParams
-                params.height = miniH.toInt()
-                params.gravity = Gravity.BOTTOM
-                params.bottomMargin = bottomNavH.toInt()
-                playerPanel.layoutParams = params
-                playerPanel.translationY = 0f
-                playerPanel.setBackgroundColor(Color.parseColor("#212121"))
-            }
-            .start()
-
-        playerWebView.pivotX = 0f
-        playerWebView.pivotY = 0f
-        playerWebView.animate()
-            .scaleX(scale)
-            .scaleY(scale)
-            .translationX(tx)
-            .translationY(ty)
-            .setDuration(260)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
-    }
-
-    private fun parseVideoRect(result: String?): FloatArray? {
-        return try {
-            val raw = result?.trim()?.trim('"') ?: return null
-            if (raw.isEmpty() || raw == "null") return null
-            val parts = raw.split(",").map { it.trim().toFloat() }
-            if (parts.size < 5 || parts[2] < 20f || parts[3] < 20f) null else parts.toFloatArray()
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    /** Giữ playerWebView ở kích thước cố định (full màn hình) khi panel bị co nhỏ. */
-    private fun lockPlayerWebViewSize(w: Int, h: Int) {
-        if (w <= 0 || h <= 0) return
-        val lp = playerWebView.layoutParams as FrameLayout.LayoutParams
-        if (lp.width != w || lp.height != h) {
-            lp.width = w
-            lp.height = h
-            playerWebView.layoutParams = lp
-        }
-    }
-
-    /** Trả playerWebView về MATCH_PARENT (dùng khi xem full / PiP / fullscreen). */
-    private fun unlockPlayerWebViewSize() {
-        val lp = playerWebView.layoutParams as FrameLayout.LayoutParams
-        if (lp.width != ViewGroup.LayoutParams.MATCH_PARENT || lp.height != ViewGroup.LayoutParams.MATCH_PARENT) {
-            lp.width = ViewGroup.LayoutParams.MATCH_PARENT
-            lp.height = ViewGroup.LayoutParams.MATCH_PARENT
-            playerWebView.layoutParams = lp
-        }
-    }
-
-    private fun resetPlayerWebViewTransform() {
-        playerWebView.animate().cancel()
-        playerWebView.pivotX = 0f
-        playerWebView.pivotY = 0f
-        playerWebView.scaleX = 1f
-        playerWebView.scaleY = 1f
-        playerWebView.translationX = 0f
-        playerWebView.translationY = 0f
-    }
-
-    /**
-     * Bung to lớp xem video từ MiniPlayer lên toàn màn hình (EXPANDED)
-     */
-    fun expandPlayer() {
-        if (panelState == PanelState.EXPANDED || panelState == PanelState.HIDDEN) return
-        panelState = PanelState.EXPANDED
-
-        val fullW = mainContainer.width
-        val fullH = mainContainer.height
-        val bottomNavH = dpToPx(bottomNavHeightDp)
-        val miniH = dpToPx(64f)
-        val targetY = (fullH - bottomNavH - miniH).coerceAtLeast(0f)
-
-        // Giữ WebView full size trong lúc animate để không bị relayout giữa chừng
-        lockPlayerWebViewSize(fullW, fullH)
-
-        // Phục hồi panel MATCH_PARENT nhưng bắt đầu từ vị trí miniplayer hiện tại
-        playerPanel.animate().cancel()
-        val params = playerPanel.layoutParams as FrameLayout.LayoutParams
-        params.height = ViewGroup.LayoutParams.MATCH_PARENT
-        params.gravity = Gravity.TOP
-        params.bottomMargin = 0
-        playerPanel.layoutParams = params
-        playerPanel.translationY = targetY
-        playerPanel.setBackgroundColor(Color.BLACK)
-
-        miniPlayerBar.visibility = View.GONE
-        btnMinimizePlayer.visibility = View.VISIBLE
-        playerDragArea.visibility = View.VISIBLE
-
-        playerPanel.animate()
-            .translationY(0f)
-            .setDuration(260)
-            .setInterpolator(DecelerateInterpolator())
-            .withEndAction {
-                if (panelState != PanelState.EXPANDED) return@withEndAction
-                unlockPlayerWebViewSize()
-                // Đồng bộ lại trạng thái nội bộ của YouTube Player với thẻ <video> thật
-                // để nút Play/Pause của YouTube hoạt động ngay sau khi bung to
-                runPipCommand("resync")
-            }
-            .start()
-
-        playerWebView.pivotX = 0f
-        playerWebView.pivotY = 0f
-        playerWebView.animate()
-            .scaleX(1f)
-            .scaleY(1f)
-            .translationX(0f)
-            .translationY(0f)
-            .setDuration(260)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
-    }
-
-    /**
-     * Tắt hẳn video player và ẩn lớp phát video
-     */
-    fun closePlayer() {
-        if (panelState == PanelState.HIDDEN) return
-        panelState = PanelState.HIDDEN
-
-        val targetY = mainContainer.height.toFloat()
-        playerPanel.animate().cancel()
-        playerPanel.animate()
-            .translationY(targetY)
-            .setDuration(200)
-            .withEndAction {
-                playerPanel.visibility = View.GONE
-                val params = playerPanel.layoutParams as FrameLayout.LayoutParams
-                params.height = ViewGroup.LayoutParams.MATCH_PARENT
-                params.gravity = Gravity.TOP
-                params.bottomMargin = 0
-                playerPanel.layoutParams = params
-                playerPanel.translationY = 0f
-                playerPanel.setBackgroundColor(Color.BLACK)
-
-                resetPlayerWebViewTransform()
-                unlockPlayerWebViewSize()
-
-                playerWebView.loadUrl("about:blank")
-                currentVideoId = ""
-                positionMs = 0L
-                durationMs = -1L
-                isVideoPlaying = false
-                lastMiniIconPlaying = null
-                cancelPendingPipEnterCallbacks()
-                pipHandler.removeCallbacks(pendingCollapseRunnable)
-                stopMediaService()
-                updatePipParams()
-            }
-            .start()
-    }
-
-    private fun dpToPx(dp: Float): Float {
-        return dp * resources.displayMetrics.density
-    }
-
-    private fun enterFullscreen(view: View?, callback: WebChromeClient.CustomViewCallback?) {
-        if (customView != null) {
-            exitFullscreen()
-            return
-        }
-
-        customView = view
-        customViewCallback = callback
-        isFullscreen = true
-        swipeRefreshLayout.isEnabled = false
-
-        webView.visibility = View.GONE
-        playerPanel.visibility = View.GONE
-        customViewContainer.visibility = View.VISIBLE
-        customViewContainer.addView(
-            view,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        )
-
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        updatePipParams()
-    }
-
-    private fun exitFullscreen() {
-        if (customView == null) return
-
-        isFullscreen = false
-        customViewContainer.removeView(customView)
-        customView = null
-        customViewCallback?.onCustomViewHidden()
-
-        customViewContainer.visibility = View.GONE
-        webView.visibility = View.VISIBLE
-        if (panelState != PanelState.HIDDEN) {
-            playerPanel.visibility = View.VISIBLE
-        }
-        if (!isInPipModeCompat()) {
-            swipeRefreshLayout.isEnabled = true
-        }
-
-        window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        updatePipParams()
-    }
-
-    private fun setupBackPressedHandler() {
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                if (isFullscreen) {
-                    exitFullscreen()
-                    return
-                }
-
-                // 1. Nếu đang xem video toàn màn hình (EXPANDED) -> Thu nhỏ thành MiniPlayer
-                if (panelState == PanelState.EXPANDED) {
-                    collapsePlayer()
-                    return
-                }
-
-                // 2. Nếu MiniPlayer đang thu nhỏ ở đáy (COLLAPSED):
-                // Bấm Back sẽ đóng MiniPlayer ngay lập tức để người dùng tập trung lướt trang chủ
-                if (panelState == PanelState.COLLAPSED) {
-                    closePlayer()
-                    return
-                }
-
-                // 3. Nếu không có video player:
-                if (webView.canGoBack()) {
-                    webView.goBack()
-                } else {
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
-                }
-            }
-        })
-    }
-
-    /**
-     * Hiển thị BottomSheet Cài đặt ứng dụng
-     */
-    fun showSettingsDialog() {
-        val dialog = BottomSheetDialog(this)
-        val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
-        dialog.setContentView(dialogView)
-
-        val switchAdBlock = dialogView.findViewById<SwitchMaterial>(R.id.switchAdBlock)
-        val switchBackgroundPlay = dialogView.findViewById<SwitchMaterial>(R.id.switchBackgroundPlay)
-        val switchAutoPip = dialogView.findViewById<SwitchMaterial>(R.id.switchAutoPip)
-        val switchPreloadCache = dialogView.findViewById<SwitchMaterial>(R.id.switchPreloadCache)
-        val tvCacheSize = dialogView.findViewById<TextView>(R.id.tvCacheSize)
-        val btnClearCache = dialogView.findViewById<MaterialButton>(R.id.btnClearCache)
-        val btnReloadInSettings = dialogView.findViewById<MaterialButton>(R.id.btnReloadInSettings)
-        val btnCloseSettings = dialogView.findViewById<MaterialButton>(R.id.btnCloseSettings)
-
-        // Khởi tạo trạng thái Switch từ AppSettings
-        switchAdBlock.isChecked = AppSettings.isAdBlockEnabled(this)
-        switchBackgroundPlay.isChecked = AppSettings.isBackgroundPlayEnabled(this)
-        switchAutoPip.isChecked = AppSettings.isAutoPipEnabled(this)
-        switchPreloadCache.isChecked = AppSettings.isPreloadCacheEnabled(this)
-
-        fun updateCacheDisplay() {
-            val totalBytes = WebResourceCacheManager.getCacheSizeBytes(this) + AppSettings.getCacheSizeBytes(this)
-            val mb = totalBytes.toDouble() / (1024.0 * 1024.0)
-            tvCacheSize.text = getString(R.string.setting_cache_size_format, mb)
-        }
-
-        updateCacheDisplay()
-
-        switchAdBlock.setOnCheckedChangeListener { _, isChecked ->
-            AppSettings.setAdBlockEnabled(this, isChecked)
-            AdBlockEngine.isEnabled = isChecked
-            syncSettingsToWeb()
-        }
-
-        switchBackgroundPlay.setOnCheckedChangeListener { _, isChecked ->
-            AppSettings.setBackgroundPlayEnabled(this, isChecked)
-            syncSettingsToWeb()
-        }
-
-        switchAutoPip.setOnCheckedChangeListener { _, isChecked ->
-            AppSettings.setAutoPipEnabled(this, isChecked)
-            syncSettingsToWeb()
-            updatePipParams()
-        }
-
-        switchPreloadCache.setOnCheckedChangeListener { _, isChecked ->
-            AppSettings.setPreloadCacheEnabled(this, isChecked)
-            WebResourceCacheManager.isEnabled = isChecked
-            syncSettingsToWeb()
-        }
-
-        btnClearCache.setOnClickListener {
-            WebResourceCacheManager.clearCache(this)
-            AppSettings.clearAppCache(this)
-            webView.clearCache(true)
-            playerWebView.clearCache(true)
-            updateCacheDisplay()
-        }
-
-        btnReloadInSettings.setOnClickListener {
-            dialog.dismiss()
-            if (panelState != PanelState.HIDDEN) {
-                playerWebView.reload()
-            } else {
-                webView.reload()
-            }
-        }
-
-        btnCloseSettings.setOnClickListener {
-            dialog.dismiss()
-        }
-
-        dialog.show()
-    }
-
-    private fun syncSettingsToWeb() {
-        val settingsJson = AppSettings.toJson(this)
-        val script = "if (window.__bravePip && window.__bravePip.applySettings) window.__bravePip.applySettings($settingsJson); else window.__braveSettings = $settingsJson;"
-        webView.evaluateJavascript(script, null)
-        playerWebView.evaluateJavascript(script, null)
-    }
-
-    private fun clampedPipAspectRatio(): Rational {
-        val ratio = videoAspectRatio.toFloat()
-        if (ratio.isNaN() || ratio <= 0f) return Rational(16, 9)
-        val maxRatio = 2.39f
-        val minRatio = 1f / 2.39f
-        return when {
-            ratio > maxRatio -> Rational(239, 100)
-            ratio < minRatio -> Rational(100, 239)
-            else -> videoAspectRatio
-        }
-    }
-
-    private fun extractVideoIdFromUrl(url: String?): String {
-        if (url.isNullOrBlank()) return ""
-        return try {
-            val uri = Uri.parse(url)
-            val v = uri.getQueryParameter("v")
-            if (!v.isNullOrBlank()) return v
-            val segments = uri.pathSegments
-            val shortsIdx = segments.indexOf("shorts")
-            if (shortsIdx >= 0 && shortsIdx + 1 < segments.size) {
-                return segments[shortsIdx + 1]
-            }
-            if (uri.host?.contains("youtu.be") == true && segments.isNotEmpty()) {
-                return segments[0]
-            }
-            ""
-        } catch (_: Exception) {
-            ""
-        }
-    }
-
-    private fun cancelPendingPipEnterCallbacks() {
-        pendingPipEnterRunnables.forEach { pipHandler.removeCallbacks(it) }
-        pendingPipEnterRunnables.clear()
-    }
-
-    private fun buildPipParams(): PictureInPictureParams? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null
-        val builder = PictureInPictureParams.Builder()
-
-        try {
-            builder.setAspectRatio(clampedPipAspectRatio())
-        } catch (_: Exception) {}
-
-        // 1. Trái Play/Pause: Nút Tai nghe (ẩn popup, giữ âm thanh nền qua MediaService)
-        val headphonesIntent = Intent(ACTION_PIP_HEADPHONES).setPackage(packageName)
-        val headphonesPendingIntent = PendingIntent.getBroadcast(
-            this,
-            1003,
-            headphonesIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val headphonesAction = RemoteAction(
-            Icon.createWithResource(this, R.drawable.ic_pip_headphones),
-            "Nghe nền",
-            "Ẩn popup video, chỉ nghe âm thanh",
-            headphonesPendingIntent
-        )
-
-        // 2. Giữa: Nút Play / Pause
-        val iconRes = if (isVideoPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val actionTitle = if (isVideoPlaying) "Tạm dừng" else "Phát"
-        val actionIntent = Intent(if (isVideoPlaying) ACTION_PIP_PAUSE else ACTION_PIP_PLAY)
-        actionIntent.setPackage(packageName)
-        val requestCode = if (isVideoPlaying) 1002 else 1001
-        val playPausePendingIntent = PendingIntent.getBroadcast(
-            this,
-            requestCode,
-            actionIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val playPauseAction = RemoteAction(
-            Icon.createWithResource(this, iconRes),
-            actionTitle,
-            actionTitle,
-            playPausePendingIntent
-        )
-
-        // 3. Phải Play/Pause: Nút Phát video tiếp theo
-        val nextIntent = Intent(MediaService.ACTION_MEDIA_NEXT).setPackage(packageName)
-        val nextPendingIntent = PendingIntent.getBroadcast(
-            this,
-            1004,
-            nextIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val nextAction = RemoteAction(
-            Icon.createWithResource(this, android.R.drawable.ic_media_next),
-            "Tiếp theo",
-            "Phát video tiếp theo",
-            nextPendingIntent
-        )
-
-        val maxActions = maxNumPictureInPictureActions
-        val actions = when {
-            maxActions >= 3 -> listOf(headphonesAction, playPauseAction, nextAction)
-            maxActions == 2 -> listOf(headphonesAction, playPauseAction)
-            else -> listOf(playPauseAction)
-        }
-        builder.setActions(actions)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val autoPip = AppSettings.isAutoPipEnabled(this)
-            builder.setAutoEnterEnabled((isVideoPlaying || isFullscreen) && autoPip)
-            builder.setSeamlessResizeEnabled(false)
-        }
-        return builder.build()
-    }
-
-    private fun updatePipParams() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                buildPipParams()?.let { setPictureInPictureParams(it) }
-            } catch (_: Exception) {}
-        }
-    }
-
-    /**
-     * Chèn pip_controller.js rồi gọi window.__bravePip.<method>() trên target WebView.
-     */
-    private fun runPipCommand(method: String, onResult: ((String?) -> Unit)? = null) {
-        val target = if (panelState != PanelState.HIDDEN) playerWebView else webView
-        val script = buildString {
-            append(pipControllerJs)
-            append("\n;(function(){try{")
-            append("return window.__bravePip ? String(window.__bravePip.$method()) : 'pip:missing';")
-            append("}catch(e){return 'pip:error:' + e;}})();")
-        }
-        target.evaluateJavascript(script) { result ->
-            Log.d(TAG, "PiP $method -> $result")
-            onResult?.invoke(result)
-        }
-    }
-
-    private fun enterPipLayout() {
-        isInPipLayout = true
-        isHidingPipToAudio = false
-        pipHandler.removeCallbacks(pendingCollapseRunnable)
-        progressBar.visibility = View.GONE
-        swipeRefreshLayout.isEnabled = false
-
-        // Nếu đang ở MiniPlayer mà vào PiP: Phải đưa playerPanel về full screen và ẩn Browse view để PiP chụp đúng video!
-        if (panelState == PanelState.COLLAPSED) {
-            wasCollapsedBeforePip = true
-
-            // Tạm thời ẩn Browse View để cửa sổ PiP chỉ render duy nhất video của playerWebView
-            swipeRefreshLayout.visibility = View.GONE
-
-            val params = playerPanel.layoutParams as FrameLayout.LayoutParams
-            params.height = ViewGroup.LayoutParams.MATCH_PARENT
-            params.gravity = Gravity.TOP
-            params.bottomMargin = 0
-            playerPanel.animate().cancel()
-            playerPanel.layoutParams = params
-            playerPanel.translationY = 0f
-            playerPanel.setBackgroundColor(Color.BLACK)
-
-            miniPlayerBar.visibility = View.GONE
-            btnMinimizePlayer.visibility = View.GONE
-            playerDragArea.visibility = View.GONE
-
-            // WebView phải co giãn theo cửa sổ PiP → trả về MATCH_PARENT
-            resetPlayerWebViewTransform()
-            unlockPlayerWebViewSize()
-        }
-
-        val target = if (panelState != PanelState.HIDDEN) playerWebView else webView
-        target.evaluateJavascript(
-            "window.__braveEnteringPip = true; window.__braveProtectPlayUntil = Date.now() + 3500;",
-            null
-        )
-        runPipCommand("enter")
-
-        // Luôn bật Media Player (notification + thumbnail) ngay cả khi đang ở chế độ popup PiP
-        if (!isMediaServiceActive && (isVideoPlaying || panelState != PanelState.HIDDEN)) {
-            startMediaService()
-        } else if (isMediaServiceActive) {
-            updateMediaService()
-        }
-    }
-
-    private fun exitPipLayout(restoreMiniIfCollapsed: Boolean = true) {
-        isInPipLayout = false
-        swipeRefreshLayout.visibility = View.VISIBLE
-        if (!isFullscreen) {
-            swipeRefreshLayout.isEnabled = true
-        }
-        runPipCommand("exit")
-
-        // Nếu trước khi vào PiP người dùng đang ở MiniPlayer → chờ cửa sổ bung lại full kích thước
-        // rồi mới thu nhỏ về MiniPlayer (nếu thu ngay, kích thước mainContainer vẫn còn là kích thước PiP)
-        if (wasCollapsedBeforePip) {
-            wasCollapsedBeforePip = false
-            panelState = PanelState.EXPANDED
-            btnMinimizePlayer.visibility = View.VISIBLE
-            playerDragArea.visibility = View.VISIBLE
-            if (restoreMiniIfCollapsed) {
-                pipHandler.removeCallbacks(pendingCollapseRunnable)
-                pipHandler.postDelayed(pendingCollapseRunnable, 450)
-            }
-        }
-    }
-
-    /**
-     * Nút Tai nghe (trái Play/Pause trong PiP):
-     * Ẩn cửa sổ video popup nhưng vẫn giữ âm thanh & Media Player chạy nền.
-     */
-    private fun handlePipHeadphones() {
-        isHidingPipToAudio = true
-        hidingPipToAudioAtMs = SystemClock.elapsedRealtime()
-        cancelPendingPipEnterCallbacks()
-        pipHandler.removeCallbacks(pendingCollapseRunnable)
-        wasCollapsedBeforePip = false
-
-        val target = if (panelState != PanelState.HIDDEN) playerWebView else webView
-        target.evaluateJavascript(
-            """
-            (function(){
-                try {
-                    window.__braveUserPaused = false;
-                    window.__braveAppInBackground = true;
-                    window.__braveProtectPlayUntil = Date.now() + 4500;
-                    if (window.__bravePip) {
-                        window.__bravePip.setBackground(true);
-                        var mv = window.__bravePip.mainVideo && window.__bravePip.mainVideo();
-                        if (mv && mv.paused) window.__bravePip.play();
-                    }
-                } catch(e) {}
-            })();
-            """.trimIndent(),
-            null
-        )
-        isVideoPlaying = true
-        startMediaService()
-
-        try {
-            moveTaskToBack(true)
-        } catch (_: Exception) {}
-    }
-
-    /**
-     * Khi người dùng bấm dấu [X] (hoặc kéo đóng) cửa sổ PiP:
-     * Tạm dừng hẳn video và tắt hoàn toàn MediaService / Notification.
-     */
-    private fun dismissPipAndStopMedia() {
-        cancelPendingPipEnterCallbacks()
-        pipHandler.removeCallbacks(pendingCollapseRunnable)
-        isInPipLayout = false
-        swipeRefreshLayout.visibility = View.VISIBLE
-        if (!isFullscreen) {
-            swipeRefreshLayout.isEnabled = true
-        }
-        if (wasCollapsedBeforePip) {
-            wasCollapsedBeforePip = false
-            panelState = PanelState.EXPANDED
-        }
-        if (panelState == PanelState.EXPANDED) {
-            btnMinimizePlayer.visibility = View.VISIBLE
-            playerDragArea.visibility = View.VISIBLE
-        }
-
-        isVideoPlaying = false
-        lastMiniIconPlaying = false
-        btnMiniPlayerPlayPause.setImageResource(android.R.drawable.ic_media_play)
-
-        val target = if (panelState != PanelState.HIDDEN) playerWebView else webView
-        target.evaluateJavascript(
-            """
-            (function(){
-                try {
-                    if (window.__bravePip) {
-                        window.__bravePip.pause();
-                        window.__bravePip.exit();
+            SettingsBottomSheet.show(
+                activity = this,
+                onSettingsChanged = { syncAllSettingsToWeb() },
+                onClearWebViewsCache = {
+                    binding.webView.clearCache(true)
+                    binding.playerWebView.clearCache(true)
+                },
+                onReloadActiveWebView = {
+                    if (playerSheet.isVisible) {
+                        binding.playerWebView.reload()
                     } else {
-                        window.__braveUserPaused = true;
-                        window.__braveProtectPlayUntil = 0;
-                        window.__braveAllowPauseUntil = Date.now() + 1200;
-                        document.querySelectorAll('video').forEach(function(v){
-                            try { (window.__braveNativePause || v.pause).call(v); } catch(e1) {}
-                        });
+                        binding.webView.reload()
                     }
-                } catch(e) {}
-            })();
-            """.trimIndent(),
-            null
-        )
-        stopMediaService()
-        updatePipParams()
+                }
+            )
+        }
     }
 
-    private fun handlePipPlay() {
-        isVideoPlaying = true
-        updatePipParams()
-        runPipCommand("play")
-        updateMediaService(isPlaying = true)
+    override fun onMediaStateReceived(
+        fromPlayer: Boolean,
+        playing: Boolean,
+        videoId: String,
+        title: String,
+        channel: String,
+        posMs: Long,
+        durMs: Long,
+        videoWidth: Int,
+        videoHeight: Int
+    ) {
+        runOnUiThread {
+            playbackCoordinator.handleMediaStateFromWeb(
+                fromPlayer = fromPlayer,
+                playing = playing,
+                videoId = videoId,
+                title = title,
+                channel = channel,
+                posMs = posMs,
+                durMs = durMs,
+                videoWidth = videoWidth,
+                videoHeight = videoHeight
+            )
+        }
     }
 
-    private fun handlePipPause() {
-        isVideoPlaying = false
-        updatePipParams()
-        runPipCommand("pause")
-        updateMediaService(isPlaying = false)
+    // ==============================================================
+    // Activity Lifecycle & PiP / Configuration Callbacks
+    // ==============================================================
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        playerSheet.onConfigurationChanged()
     }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        val autoPip = AppSettings.isAutoPipEnabled(this)
-        if ((isVideoPlaying || isFullscreen) && autoPip) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                enterPipLayout()
-                try {
-                    if (!isInPictureInPictureMode) {
-                        buildPipParams()?.let { enterPictureInPictureMode(it) }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "enterPictureInPictureMode lỗi: ${e.message}")
-                }
-            }
-        }
+        pipController.onUserLeaveHint()
     }
 
     override fun onPictureInPictureModeChanged(
@@ -1183,291 +379,36 @@ class MainActivity : AppCompatActivity() {
         newConfig: Configuration
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        if (isInPictureInPictureMode) {
-            wasInPipMode = true
-            isHidingPipToAudio = false
-            swipeRefreshLayout.isEnabled = false
-            cancelPendingPipEnterCallbacks()
-            enterPipLayout()
-
-            val r1 = Runnable { if (isInPipModeCompat()) enterPipLayout() }
-            val r2 = Runnable { if (isInPipModeCompat()) enterPipLayout() }
-            pendingPipEnterRunnables.add(r1)
-            pendingPipEnterRunnables.add(r2)
-            pipHandler.postDelayed(r1, 150)
-            pipHandler.postDelayed(r2, 450)
-            updatePipParams()
-        } else {
-            cancelPendingPipEnterCallbacks()
-            if (isHidingPipToAudio && (SystemClock.elapsedRealtime() - hidingPipToAudioAtMs) < 8000L) {
-                // Đang chuyển từ PiP sang chỉ nghe âm thanh nền qua nút Tai nghe
-                exitPipLayout(restoreMiniIfCollapsed = false)
-            } else if (lifecycle.currentState == Lifecycle.State.CREATED) {
-                // Người dùng bấm nút [X] đóng cửa sổ PiP -> dừng video + tắt Media Player
-                wasInPipMode = false
-                dismissPipAndStopMedia()
-            } else {
-                exitPipLayout(restoreMiniIfCollapsed = true)
-                if (!isFullscreen) {
-                    swipeRefreshLayout.isEnabled = true
-                }
-            }
-        }
-    }
-
-    private fun isInPipModeCompat(): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
-
-    override fun onResume() {
-        super.onResume()
-        if (!isInPipModeCompat()) {
-            wasInPipMode = false
-            isHidingPipToAudio = false
-            cancelPendingPipEnterCallbacks()
-            if (isInPipLayout) {
-                exitPipLayout(restoreMiniIfCollapsed = true)
-            }
-            if (!isFullscreen) {
-                swipeRefreshLayout.isEnabled = true
-            }
-            runPipCommand("setBackground(false)")
-            stopMediaService()
-        }
+        pipController.onPictureInPictureModeChanged(isInPictureInPictureMode)
     }
 
     override fun onStart() {
         super.onStart()
-        if (!isInPipModeCompat() && !wasInPipMode && !isHidingPipToAudio) {
-            runPipCommand("setBackground(false)")
-            stopMediaService()
+        if (!pipController.isInPipMode() && !pipController.isSwitchingToAudioOnly) {
+            playbackCoordinator.onForegroundEntered()
         }
     }
 
-    override fun onPause() {
-        super.onPause()
+    override fun onResume() {
+        super.onResume()
+        pipController.onActivityResumed()
     }
 
     override fun onStop() {
         super.onStop()
-        if (isInPipModeCompat()) {
-            // Tắt màn hình khi đang ở cửa sổ PiP -> giữ phát nền nếu bật Background Play
-            runPipCommand("setBackground(true)")
-            if (isVideoPlaying && AppSettings.isBackgroundPlayEnabled(this)) {
-                startMediaService()
-            }
-            return
-        }
-
-        if (wasInPipMode) {
-            wasInPipMode = false
-            if (isHidingPipToAudio && (SystemClock.elapsedRealtime() - hidingPipToAudioAtMs) < 8000L) {
-                // Thoát PiP bằng nút Tai nghe -> giữ âm thanh chạy nền + Media Player notification
-                isHidingPipToAudio = false
-                runPipCommand("setBackground(true)")
-                startMediaService()
-            } else {
-                // Thoát PiP bằng nút [X] (onPictureInPictureModeChanged(false) -> onStop) -> tắt video & media
-                isHidingPipToAudio = false
-                dismissPipAndStopMedia()
-            }
-            return
-        }
-
-        runPipCommand("setBackground(true)")
-        val bgPlay = AppSettings.isBackgroundPlayEnabled(this)
-        if (isVideoPlaying && bgPlay) {
-            startMediaService()
-        }
-    }
-
-    private fun resolvedVideoId(): String {
-        if (currentVideoId.isNotEmpty()) return currentVideoId
-        return extractVideoIdFromUrl(playerWebView.url)
-    }
-
-    private fun startMediaService() {
-        try {
-            val vid = resolvedVideoId()
-            if (vid.isNotEmpty()) currentVideoId = vid
-            val intent = Intent(this, MediaService::class.java).apply {
-                action = MediaService.ACTION_START
-                putExtra(MediaService.EXTRA_TITLE, currentTitle)
-                putExtra(MediaService.EXTRA_CHANNEL, currentChannel)
-                putExtra(MediaService.EXTRA_IS_PLAYING, isVideoPlaying)
-                putExtra(MediaService.EXTRA_POSITION_MS, positionMs)
-                putExtra(MediaService.EXTRA_DURATION_MS, durationMs)
-                putExtra(MediaService.EXTRA_VIDEO_ID, vid)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-            isMediaServiceActive = true
-        } catch (_: Exception) {}
-    }
-
-    private fun updateMediaService(isPlaying: Boolean? = null) {
-        if (!isMediaServiceActive) return
-        try {
-            val vid = resolvedVideoId()
-            if (vid.isNotEmpty()) currentVideoId = vid
-            val intent = Intent(this, MediaService::class.java).apply {
-                action = MediaService.ACTION_UPDATE
-                putExtra(MediaService.EXTRA_TITLE, currentTitle)
-                putExtra(MediaService.EXTRA_CHANNEL, currentChannel)
-                putExtra(MediaService.EXTRA_IS_PLAYING, isPlaying ?: isVideoPlaying)
-                putExtra(MediaService.EXTRA_POSITION_MS, positionMs)
-                putExtra(MediaService.EXTRA_DURATION_MS, durationMs)
-                putExtra(MediaService.EXTRA_VIDEO_ID, vid)
-            }
-            startService(intent)
-        } catch (_: Exception) {}
-    }
-
-    private fun stopMediaService() {
-        try {
-            val intent = Intent(this, MediaService::class.java).apply {
-                action = MediaService.ACTION_STOP
-            }
-            startService(intent)
-            isMediaServiceActive = false
-        } catch (_: Exception) {}
+        pipController.onActivityStopped()
     }
 
     override fun onDestroy() {
-        cancelPendingPipEnterCallbacks()
-        pipHandler.removeCallbacksAndMessages(null)
-        try {
-            unregisterReceiver(mediaActionReceiver)
-        } catch (_: Exception) {}
-        stopMediaService()
-        webView.destroy()
-        playerWebView.destroy()
+        pipController.unregister()
+        playerSheet.release()
+        playbackCoordinator.release()
+        browseBridge.detach()
+        playerBridge.detach()
+        browseClient.release()
+        playerClient.release()
+        binding.webView.safeDestroy(BRIDGE_NAME)
+        binding.playerWebView.safeDestroy(BRIDGE_NAME)
         super.onDestroy()
-    }
-
-    /**
-     * Cập nhật trạng thái phát + MiniPlayer Bar. Chỉ set lại View khi giá trị thực sự thay đổi
-     * để tránh nhấp nháy giao diện.
-     */
-    private fun applyMediaState(
-        playing: Boolean,
-        title: String,
-        channel: String,
-        posMs: Long,
-        durMs: Long,
-        videoId: String = ""
-    ) {
-        val playingChanged = playing != isVideoPlaying
-        isVideoPlaying = playing
-
-        val cleanVid = videoId.trim()
-        if (cleanVid.isNotEmpty() && cleanVid != currentVideoId) {
-            currentVideoId = cleanVid
-        }
-
-        val cleanTitle = title.trim()
-        if (cleanTitle.isNotEmpty() && cleanTitle != "LiteTube" && cleanTitle != "YouTube") {
-            currentTitle = cleanTitle
-        }
-        if (channel.isNotBlank()) currentChannel = channel.trim()
-        if (posMs >= 0) positionMs = posMs
-        if (durMs > 0) durationMs = durMs
-
-        if (tvMiniPlayerTitle.text.toString() != currentTitle) tvMiniPlayerTitle.text = currentTitle
-        if (tvMiniPlayerChannel.text.toString() != currentChannel) tvMiniPlayerChannel.text = currentChannel
-        if (playingChanged || lastMiniIconPlaying != playing) {
-            lastMiniIconPlaying = playing
-            btnMiniPlayerPlayPause.setImageResource(
-                if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-            )
-        }
-        if (playingChanged) updatePipParams()
-        if (!isMediaServiceActive && isInPipModeCompat() && (playing || panelState != PanelState.HIDDEN)) {
-            startMediaService()
-        } else {
-            updateMediaService()
-        }
-    }
-
-    inner class MediaBridge(private val fromPlayer: Boolean) {
-        @JavascriptInterface
-        fun openWatchLayer(url: String) {
-            if (url.isNotEmpty()) {
-                runOnUiThread {
-                    openVideoPlayer(url)
-                }
-            }
-        }
-
-        @JavascriptInterface
-        fun openSettings() {
-            runOnUiThread {
-                showSettingsDialog()
-            }
-        }
-
-        /**
-         * Chỉ nhận trạng thái media từ đúng WebView đang phát:
-         * - Khi lớp Player đang mở (EXPANDED/COLLAPSED): chỉ nhận từ playerWebView
-         * - Khi lớp Player ẩn: chỉ nhận từ webView (Browse, ví dụ Shorts)
-         * Tránh việc trang chủ liên tục báo "paused" + tiêu đề trang chủ đè lên video đang phát
-         * (nguyên nhân tên video nhảy lung tung và icon play/pause nhấp nháy trên MiniPlayer).
-         */
-        private fun acceptMedia(): Boolean =
-            if (panelState != PanelState.HIDDEN) fromPlayer else !fromPlayer
-
-        @JavascriptInterface
-        fun onVideoPlaying(title: String, channel: String) {
-            runOnUiThread {
-                if (!acceptMedia()) return@runOnUiThread
-                applyMediaState(true, title, channel, -1L, -1L)
-            }
-        }
-
-        @JavascriptInterface
-        fun onVideoPaused() {
-            runOnUiThread {
-                if (!acceptMedia()) return@runOnUiThread
-                applyMediaState(false, "", "", -1L, -1L)
-            }
-        }
-
-        @JavascriptInterface
-        fun onMediaStateChanged(playing: Boolean, title: String, channel: String, posMs: Long, durMs: Long) {
-            runOnUiThread {
-                if (!acceptMedia()) return@runOnUiThread
-                applyMediaState(playing, title, channel, posMs, durMs)
-            }
-        }
-
-        @JavascriptInterface
-        fun onMediaStateWithId(
-            playing: Boolean,
-            videoId: String,
-            title: String,
-            channel: String,
-            posMs: Long,
-            durMs: Long
-        ) {
-            runOnUiThread {
-                if (!acceptMedia()) return@runOnUiThread
-                applyMediaState(playing, title, channel, posMs, durMs, videoId)
-            }
-        }
-
-        @JavascriptInterface
-        fun onVideoSize(width: Int, height: Int) {
-            if (width <= 0 || height <= 0) return
-            runOnUiThread {
-                if (!acceptMedia()) return@runOnUiThread
-                val newRatio = Rational(width, height)
-                if (newRatio != videoAspectRatio) {
-                    videoAspectRatio = newRatio
-                    updatePipParams()
-                }
-            }
-        }
     }
 }

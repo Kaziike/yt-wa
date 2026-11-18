@@ -80,10 +80,10 @@ override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?
 ## 3. `network/WebResourceCacheManager.kt` - Quản Lý Bộ Nhớ Đệm Tĩnh
 
 Quản lý việc lưu trữ và nạp các tài nguyên tĩnh của YouTube để giảm thời gian tải lặp lại:
-- **Tài nguyên hỗ trợ:** Các file `.js` (Polymer, MWeb bundle), `.css`, `.woff2` (Roboto fonts), `.svg` và ảnh tĩnh.
-- **Lưu trữ:** Lưu trong thư mục `cache/web_static/` với tên file là mã băm `MD5(url)`.
-- **Độ tin cậy:** Kiểm tra tính toàn vẹn của file (dung lượng $>0$), trả về `WebResourceResponse` với mã HTTP 200 và MIME Type phù hợp.
-- **Tiện ích hệ thống:** Cung cấp các hàm `getCacheSizeBytes(context)` và `clearCache(context)` được liên kết trực tiếp với menu Cài đặt Native.
+- **Tài nguyên hỗ trợ:** Các file `.js` (Polymer, MWeb bundle), `.css`, `.woff2` (Roboto fonts), `.svg` và icon tĩnh.
+- **Lưu trữ:** Lưu 2 tầng gồm Memory `LruCache` (12MB) và thư mục `cacheDir/yt_static_cache/` (50MB) với tên file là mã băm `SHA-256` của URL chuẩn hóa, sử dụng khóa `Single-Flight` và nén `gzip`.
+- **Độ tin cậy:** Kiểm tra MIME Type thực tế (chống lỗi Captive Portal trả trang HTML đăng nhập), trả về `WebResourceResponse` với mã HTTP 200.
+- **Tiện ích hệ thống:** Phối hợp cùng `AppSettings.computeFormattedCacheSizeAsync` và `AppSettings.clearAppCacheAsync` để tính toán và dọn dẹp trên luồng nền không chặn UI.
 
 ---
 

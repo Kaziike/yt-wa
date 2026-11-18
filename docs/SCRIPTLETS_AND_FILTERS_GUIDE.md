@@ -50,19 +50,13 @@ html[data-brave-pip-mode] video[data-brave-pip-role="video"] {
 }
 ```
 
-### B. Micro-Seek Re-render Kick & Cờ Bảo Vệ Phát
-- **`__braveProtectPlayUntil`:** Khi chuyển đổi giữa PiP và ứng dụng đầy đủ, YouTube thường kích hoạt kiểm tra kích thước nhỏ (`PLAYER_VIEW_TOO_SMALL`) làm dừng video ngầm. Cờ thời gian này vô hiệu hóa mọi lệnh auto-pause trong 2.5 - 3.5 giây sau khi chuyển đổi.
-- **`triggerMicroSeek()`:**
+### B. Đồng Bộ Trạng Thái Trình Phát & Cờ Bảo Vệ Phát (`yt_core_bridge.js` + `pip_controller.js`)
+- **`window.__liteTube.state.protectPlayUntil`:** Khi chuyển đổi giữa PiP và ứng dụng đầy đủ, YouTube thường kích hoạt kiểm tra kích thước nhỏ (`PLAYER_VIEW_TOO_SMALL`) làm dừng video ngầm. Cờ thời gian này vô hiệu hóa lệnh auto-pause trong giai đoạn chuyển tiếp.
+- **`resyncPlayerState()` & `wakePlayerControls()`:**
   ```javascript
-  var cur = v.currentTime;
-  v.currentTime = cur; // Micro-seek không làm gián đoạn phát
-  v.dispatchEvent(new Event('seeking'));
-  v.dispatchEvent(new Event('seeked'));
-  v.dispatchEvent(new Event('timeupdate'));
-  if (player && typeof player.wakeUpControls === 'function') player.wakeUpControls();
-  if (player && typeof player.updateDimensions === 'function') player.updateDimensions();
+  core.wakePlayerControls(); // Gọi player.wakeUpControls(), updateDimensions() & bắn sự kiện resize
   ```
-  Thao tác này đánh thức ngay pipeline render và hiển thị controls của YouTube Player, triệt tiêu hoàn toàn lỗi kẹt nút Play/Pause khi phóng to lại app.
+  Đồng bộ trạng thái nội bộ `getPlayerState()` của YouTube Player API với trạng thái thực của thẻ `<video>`, triệt tiêu hoàn toàn lỗi kẹt nút Play/Pause hoặc xoay vòng loading khi phóng to lại ứng dụng.
 
 ---
 

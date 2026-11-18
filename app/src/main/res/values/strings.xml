@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LiteTube</string>
-    <string name="desc_reload">Tải lại trang</string>
-    <string name="desc_settings">Cài đặt</string>
+    <string name="desc_minimize_player">Thu nhỏ trình phát</string>
+    <string name="desc_play_pause">Phát hoặc tạm dừng</string>
+    <string name="desc_close_player">Đóng trình phát</string>
     <string name="settings_title">Cài đặt LiteTube</string>
     <string name="settings_version">Phiên bản 1.0.0</string>
     <string name="setting_adblock_title">Chặn quảng cáo &amp; Tua SSAI 16x</string>
@@ -13,8 +14,8 @@
     <string name="setting_auto_pip_desc">Thu nhỏ thành cửa sổ nổi khi vuốt về màn hình chính</string>
     <string name="setting_preload_cache_title">Tải trước &amp; Lưu đệm Web</string>
     <string name="setting_preload_cache_desc">Lưu bộ nhớ đệm JS/CSS/Font giúp mở trang tức thì, tránh tải lặp lại</string>
-    <string name="setting_cache_size_default">Bộ nhớ đệm đã lưu: 0.0 MB</string>
-    <string name="setting_cache_size_format">Bộ nhớ đệm đã lưu: %s</string>
+    <string name="setting_cache_size_default">Bộ nhớ đệm đã lưu: Đang tính…</string>
+    <string name="setting_cache_size_format">Bộ nhớ đệm đã lưu: %1$s</string>
     <string name="btn_clear_cache">Xóa bộ nhớ đệm</string>
     <string name="btn_reload_in_settings">Tải lại trang</string>
     <string name="btn_close_settings">Đóng</string>

@@ -23,6 +23,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
@@ -32,18 +33,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Bắt link YouTube mở thẳng trong app -->
-            <intent-filter android:autoVerify="true">
+            <!-- Mở trực tiếp link YouTube trong LiteTube -->
+            <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="youtube.com" />
                 <data android:scheme="https" android:host="www.youtube.com" />
                 <data android:scheme="https" android:host="m.youtube.com" />
                 <data android:scheme="https" android:host="youtu.be" />
             </intent-filter>
         </activity>
 
-        <!-- Service chạy nền giữ Audio & CPU khi tắt màn hình -->
+        <!-- Service chạy nền giữ Audio, MediaSession & CPU khi tắt màn hình -->
         <service
             android:name=".service.MediaService"
             android:enabled="true"

@@ -171,6 +171,6 @@ flowchart LR
 ## 4. Hệ Thống Bộ Nhớ Đệm Tĩnh (Static Preload Cache Manager)
 
 `WebResourceCacheManager` hoạt động song song với `AdBlockEngine` tại `shouldInterceptRequest`:
-- Nhận diện các tài nguyên tĩnh: JavaScript bundles (`desktop_polymer_v2*.js`, `mweb_*.js`), CSS, Web Fonts (`roboto*.woff2`), SVG Icons.
-- Lưu trữ cục bộ trong thư mục `cache/web_static/` của ứng dụng với mã băm MD5 làm định danh khóa.
-- Khi trang yêu cầu lại, trả về dữ liệu từ bộ nhớ đệm cục bộ với mã trạng thái HTTP 200, loại bỏ hoàn toàn độ trễ mạng và tiết kiệm tối đa băng thông 4G/5G.
+- Nhận diện các tài nguyên tĩnh: JavaScript bundles, CSS, Web Fonts (`roboto*.woff2`), SVG Icons.
+- Lưu trữ cục bộ 2 tầng (Memory `LruCache` 12MB + Disk `cacheDir/yt_static_cache/` 50MB) với mã băm `SHA-256` của URL chuẩn hóa làm khóa định danh, có cơ chế chống tải đúp `Single-Flight`, nén `gzip` và xác thực MIME chống lỗi Captive Portal.
+- Khi trang yêu cầu lại, trả về dữ liệu từ bộ nhớ đệm cục bộ với mã trạng thái HTTP 200, loại bỏ độ trễ mạng và tiết kiệm băng thông 4G/5G.

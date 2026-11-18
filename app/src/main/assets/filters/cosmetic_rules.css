@@ -1,10 +1,10 @@
 /* ==============================================================
-   COSMETIC FILTERING DÀNH RIÊNG CHO M.YOUTUBE.COM (THEO MÔ HÌNH BRAVE/UBLOCK)
+   COSMETIC FILTERING DÀNH CHO M.YOUTUBE.COM (BRAVE / UBLOCK MODEL)
+   Lưu ý: KHÔNG ẩn .ad-showing / .ad-interrupting vì đó là class trên
+   chính #movie_player chứa thẻ <video> thật!
    ============================================================== */
 
 /* 1. Ẩn tất cả banner quảng cáo, thẻ tài trợ trên trang chủ và danh sách gợi ý */
-.ad-showing,
-.ad-interrupting,
 .ytm-promoted-sparkles-web-renderer,
 .ytm-companion-ad-renderer,
 ytm-promoted-sparkles-text-search-web-renderer,
@@ -13,10 +13,13 @@ ytm-statement-banner-renderer,
 ytm-brand-video-singleton-renderer,
 ytm-compact-promoted-item-renderer,
 ytm-banner-promo-renderer,
+ytm-ad-slot-renderer,
+ytm-in-feed-ad-layout-renderer,
 div[class*="ad-display"],
-div[class*="ytp-ad-"],
 .ytp-ad-overlay-container,
-.ytp-ad-message-container {
+.ytp-ad-message-container,
+.ytp-ad-image-overlay,
+.ytp-ad-text-overlay {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
@@ -47,10 +50,13 @@ ytm-header-bar {
     border-bottom: 1px solid #272727 !important;
 }
 
-/* 4. Giảm giật lag khi cuộn trang */
-* {
+/* 4. Tắt hiệu ứng làm mờ GPU nặng trên các thanh cố định (không dùng '*' toàn cục) */
+ytm-mobile-topbar-renderer,
+ytm-pivot-bar-renderer,
+.mobile-topbar-header,
+.player-controls-background-container,
+ytm-bottom-sheet-renderer,
+dialog {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
 }
-
-/* 5. Video Popup (PiP): CSS cô lập video được chèn động bởi scriptlets/pip_controller.js */

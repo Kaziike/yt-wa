@@ -2,13 +2,17 @@ package com.brave.youtubelite.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
+import com.brave.youtubelite.network.WebResourceCacheManager
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.Executors
 
 /**
- * Quản lý cài đặt cấu hình cho YouTube Lite lưu trữ qua SharedPreferences.
- * Đồng thời cung cấp phương thức toJson() để đồng bộ trạng thái cấu hình sang JavaScript.
+ * Quản lý cài đặt cấu hình cho LiteTube qua SharedPreferences,
+ * đồng thời xử lý tính toán & dọn dẹp bộ nhớ đệm an toàn trên luồng nền (không chặn UI Thread).
  */
 object AppSettings {
     private const val PREFS_NAME = "youtube_lite_prefs"
@@ -18,103 +22,106 @@ object AppSettings {
     private const val KEY_AUTO_PIP = "auto_pip_enabled"
     private const val KEY_PRELOAD_CACHE = "preload_cache_enabled"
 
+    private val diskExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     private fun getPrefs(context: Context): SharedPreferences {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    /**
-     * Chặn quảng cáo & tự động tua SSAI 16x (Mặc định: true)
-     */
-    fun isAdBlockEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_ADBLOCK, true)
-    }
+    fun isAdBlockEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean(KEY_ADBLOCK, true)
 
     fun setAdBlockEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_ADBLOCK, enabled).apply()
     }
 
-    /**
-     * Phát âm thanh nền khi tắt màn hình hoặc chuyển app (Mặc định: true)
-     */
-    fun isBackgroundPlayEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_BACKGROUND_PLAY, true)
-    }
+    fun isBackgroundPlayEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean(KEY_BACKGROUND_PLAY, true)
 
     fun setBackgroundPlayEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_BACKGROUND_PLAY, enabled).apply()
     }
 
-    /**
-     * Tự động mở Video Popup (PiP) khi thoát ra màn hình chính (Mặc định: true)
-     */
-    fun isAutoPipEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_AUTO_PIP, true)
-    }
+    fun isAutoPipEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean(KEY_AUTO_PIP, true)
 
     fun setAutoPipEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_AUTO_PIP, enabled).apply()
     }
 
-    /**
-     * Tải trước & Lưu đệm tài nguyên Web tránh tải lặp lại (Mặc định: true)
-     */
-    fun isPreloadCacheEnabled(context: Context): Boolean {
-        return getPrefs(context).getBoolean(KEY_PRELOAD_CACHE, true)
-    }
+    fun isPreloadCacheEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean(KEY_PRELOAD_CACHE, true)
 
     fun setPreloadCacheEnabled(context: Context, enabled: Boolean) {
         getPrefs(context).edit().putBoolean(KEY_PRELOAD_CACHE, enabled).apply()
     }
 
-    /**
-     * Xuất cài đặt ra định dạng JSON cho web scriptlet (`window.__bravePip.applySettings(...)`)
-     * Ví dụ: {"adblock":true,"backgroundPlay":true,"autoPip":true,"preloadCache":true}
-     */
     fun toJson(context: Context): String {
-        val json = JSONObject().apply {
+        return JSONObject().apply {
             put("adblock", isAdBlockEnabled(context))
             put("backgroundPlay", isBackgroundPlayEnabled(context))
             put("autoPip", isAutoPipEnabled(context))
             put("preloadCache", isPreloadCacheEnabled(context))
-        }
-        return json.toString()
+        }.toString()
     }
 
     /**
-     * Tính toán tổng dung lượng bộ nhớ đệm (cache) của ứng dụng theo byte.
+     * Tính tổng dung lượng cache thực tế của ứng dụng (không cộng trùng yt_static_cache vì đã nằm trong cacheDir).
      */
-    fun getCacheSizeBytes(context: Context): Long {
-        var size: Long = 0L
+    fun getTotalCacheSizeBytes(context: Context): Long {
+        val app = context.applicationContext
+        var size = 0L
         try {
-            context.cacheDir?.let { size += calculateFolderSize(it) }
-            context.codeCacheDir?.let { size += calculateFolderSize(it) }
-            context.externalCacheDir?.let { size += calculateFolderSize(it) }
+            app.cacheDir?.let { size += calculateFolderSize(it) }
+            app.externalCacheDir?.let { size += calculateFolderSize(it) }
         } catch (_: Exception) {}
         return size
     }
 
-    /**
-     * Định dạng kích thước cache thành chuỗi hiển thị thân thiện (ví dụ: "0.0 MB" hoặc "12.4 MB").
-     */
-    fun getFormattedCacheSize(context: Context): String {
-        val bytes = getCacheSizeBytes(context)
-        val mb = bytes.toDouble() / (1024.0 * 1024.0)
+    fun formatBytesToMb(bytes: Long): String {
+        val mb = bytes.coerceAtLeast(0L).toDouble() / (1024.0 * 1024.0)
         return String.format(Locale.US, "%.1f MB", mb)
     }
 
+    fun computeFormattedCacheSizeAsync(context: Context, onResult: (String) -> Unit) {
+        val app = context.applicationContext
+        diskExecutor.execute {
+            val formatted = formatBytesToMb(getTotalCacheSizeBytes(app))
+            mainHandler.post { onResult(formatted) }
+        }
+    }
+
     /**
-     * Xóa các thư mục cache của ứng dụng.
+     * Xóa các file bên trong cacheDir & externalCacheDir mà KHÔNG xóa mất thư mục gốc cacheDir
+     * và KHÔNG xóa codeCacheDir đang sử dụng bởi hệ thống/Chromium, sau đó tái tạo yt_static_cache.
      */
-    fun clearAppCache(context: Context) {
-        try {
-            context.cacheDir?.deleteRecursively()
-            context.codeCacheDir?.deleteRecursively()
-            context.externalCacheDir?.deleteRecursively()
-        } catch (_: Exception) {}
+    fun clearAppCacheAsync(context: Context, onCleared: (String) -> Unit) {
+        val app = context.applicationContext
+        diskExecutor.execute {
+            try {
+                WebResourceCacheManager.clearCache(app)
+                clearDirectoryChildren(app.cacheDir)
+                clearDirectoryChildren(app.externalCacheDir)
+                WebResourceCacheManager.ensureCacheDir(app)
+            } catch (_: Exception) {}
+            val formatted = formatBytesToMb(getTotalCacheSizeBytes(app))
+            mainHandler.post { onCleared(formatted) }
+        }
+    }
+
+    private fun clearDirectoryChildren(dir: File?) {
+        if (dir == null || !dir.exists()) return
+        dir.listFiles()?.forEach { child ->
+            try {
+                child.deleteRecursively()
+            } catch (_: Exception) {}
+        }
     }
 
     private fun calculateFolderSize(dir: File): Long {
-        var total: Long = 0L
+        if (!dir.exists()) return 0L
+        var total = 0L
         val children = dir.listFiles() ?: return 0L
         for (child in children) {
             total += if (child.isDirectory) calculateFolderSize(child) else child.length()

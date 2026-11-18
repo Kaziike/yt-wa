@@ -41,7 +41,7 @@
             android:layout_margin="10dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@drawable/ic_chevron_down"
-            android:contentDescription="Thu nhỏ"
+            android:contentDescription="@string/desc_minimize_player"
             android:tint="@color/white" />
 
         <!-- Lớp phủ bắt cử chỉ vuốt kéo trên khu vực mép trên giữa của video khi xem to (chừa góc phải cho nút Cài đặt/Phụ đề player) -->
@@ -120,7 +120,7 @@
                     android:layout_width="44dp"
                     android:layout_height="44dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="Phát/Tạm dừng"
+                    android:contentDescription="@string/desc_play_pause"
                     android:src="@android:drawable/ic_media_pause"
                     android:tint="@color/white" />
 
@@ -130,7 +130,7 @@
                     android:layout_width="44dp"
                     android:layout_height="44dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="Đóng"
+                    android:contentDescription="@string/desc_close_player"
                     android:src="@android:drawable/ic_menu_close_clear_cancel"
                     android:tint="@color/white" />
 

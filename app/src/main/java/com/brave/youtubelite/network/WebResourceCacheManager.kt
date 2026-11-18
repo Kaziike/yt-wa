@@ -1,7 +1,6 @@
 package com.brave.youtubelite.network
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
 import android.util.LruCache
 import android.webkit.WebResourceRequest
@@ -13,10 +12,18 @@ import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.URL
 import java.security.MessageDigest
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
+import java.util.zip.GZIPInputStream
 
 /**
- * Quản lý Preload / Warmup và Lưu đệm tài nguyên tĩnh (Static Asset Cache) đa tầng
- * (Memory LRU + Disk Cache) cho YouTube Lite, giúp tránh tải lại các bundle JS/CSS/Font nặng.
+ * Quản lý lưu đệm tài nguyên tĩnh (Static Asset Cache) 2 tầng (Memory LRU + Disk Cache):
+ * - Chống tải trùng lặp đồng thời (Single-flight deduplication) giữa 2 WebView.
+ * - Hỗ trợ nén Gzip và kiểm tra Content-Length trước khi đọc để tránh tải đúp các bundle quá khổ.
+ * - Xác thực MIME Type nghiêm ngặt nhằm chống lỗi Captive Portal lưu trang HTML lỗi vào cache 7 ngày.
+ * - Theo dõi dung lượng đĩa bằng AtomicLong thay vì quét listFiles() trên luồng mạng.
  */
 object WebResourceCacheManager {
     private const val TAG = "WebResourceCache"
@@ -24,53 +31,49 @@ object WebResourceCacheManager {
     @Volatile
     var isEnabled: Boolean = true
 
-    // Giới hạn dung lượng bộ nhớ
-    private const val MAX_MEMORY_CACHE_BYTES = 12 * 1024 * 1024 // 12MB RAM
-    private const val MAX_DISK_CACHE_BYTES = 50L * 1024 * 1024  // 50MB Disk
-    private const val TARGET_DISK_CACHE_BYTES = 40L * 1024 * 1024 // 40MB khi dọn dẹp
-    private const val MAX_FILE_SIZE_BYTES = 4 * 1024 * 1024     // Tối đa 4MB / file
-    private const val CACHE_TTL_MS = 7L * 24 * 60 * 60 * 1000   // 7 ngày
+    private const val MAX_MEMORY_CACHE_BYTES = 12 * 1024 * 1024     // 12MB RAM
+    private const val MAX_DISK_CACHE_BYTES = 50L * 1024 * 1024      // 50MB Disk
+    private const val TARGET_DISK_CACHE_BYTES = 40L * 1024 * 1024   // 40MB sau khi cắt tỉa
+    private const val MAX_FILE_SIZE_BYTES = 4 * 1024 * 1024         // 4MB / file
+    private const val CACHE_TTL_MS = 7L * 24 * 60 * 60 * 1000       // 7 ngày
+    const val CACHE_DIR_NAME = "yt_static_cache"
 
-    private const val CACHE_DIR_NAME = "yt_static_cache"
-
-    // Bộ nhớ đệm Memory LRU
     data class CachedResource(
         val mimeType: String,
         val encoding: String?,
-        val data: ByteArray,
-        val headers: Map<String, String> = emptyMap()
+        val data: ByteArray
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
-
             other as CachedResource
-            if (mimeType != other.mimeType) return false
-            if (encoding != other.encoding) return false
-            if (!data.contentEquals(other.data)) return false
-            if (headers != other.headers) return false
-            return true
+            return mimeType == other.mimeType &&
+                encoding == other.encoding &&
+                data.contentEquals(other.data)
         }
 
         override fun hashCode(): Int {
             var result = mimeType.hashCode()
             result = 31 * result + (encoding?.hashCode() ?: 0)
             result = 31 * result + data.contentHashCode()
-            result = 31 * result + headers.hashCode()
             return result
         }
     }
 
     private val memoryCache = object : LruCache<String, CachedResource>(MAX_MEMORY_CACHE_BYTES) {
-        override fun sizeOf(key: String, value: CachedResource): Int {
-            return value.data.size
-        }
+        override fun sizeOf(key: String, value: CachedResource): Int = value.data.size
     }
 
-    private var diskCacheDir: File? = null
-    private var appContext: Context? = null
+    private val inFlightLocks = ConcurrentHashMap<String, Any>()
+    private val diskSizeBytes = AtomicLong(-1L)
+    private val ioExecutor = Executors.newSingleThreadExecutor()
 
-    // Danh sách host tĩnh được phép cache
+    @Volatile
+    private var diskCacheDir: File? = null
+
+    @Volatile
+    private var initialized: Boolean = false
+
     private val ALLOWED_HOSTS = setOf(
         "m.youtube.com",
         "www.youtube.com",
@@ -82,7 +85,6 @@ object WebResourceCacheManager {
         "www.gstatic.com"
     )
 
-    // Danh sách pattern thư mục tài nguyên tĩnh
     private val STATIC_PATH_PATTERNS = listOf(
         "/s/player/",
         "/s/desktop/",
@@ -91,7 +93,6 @@ object WebResourceCacheManager {
         "/yts/cssbin/"
     )
 
-    // Danh sách đuôi file tài nguyên tĩnh
     private val STATIC_EXTENSIONS = listOf(
         ".js",
         ".css",
@@ -102,166 +103,172 @@ object WebResourceCacheManager {
         ".ico"
     )
 
-    /**
-     * Khởi tạo bộ đệm đĩa và kích hoạt warmup DNS trong nền
-     */
     fun init(context: Context) {
-        if (appContext == null) {
-            val app = context.applicationContext
-            appContext = app
-            val dir = File(app.cacheDir, CACHE_DIR_NAME)
-            if (!dir.exists()) {
-                dir.mkdirs()
-            }
-            diskCacheDir = dir
-            warmupConnections(app)
-            Thread {
+        if (initialized) return
+        synchronized(this) {
+            if (initialized) return
+            val dir = ensureCacheDir(context)
+            initialized = true
+            ioExecutor.execute {
+                warmupDns()
                 trimDiskCache()
-            }.start()
+            }
             Log.d(TAG, "Đã khởi tạo WebResourceCacheManager (Dir: ${dir.absolutePath})")
         }
     }
 
     /**
-     * Khởi tạo các kết nối mạng quan trọng trước khi tải trang
+     * Đảm bảo thư mục cache luôn tồn tại (kể cả sau khi người dùng xóa bộ nhớ đệm ứng dụng).
      */
-    fun warmup(context: Context) {
-        warmupConnections(context)
+    fun ensureCacheDir(context: Context): File {
+        val app = context.applicationContext
+        val dir = diskCacheDir ?: File(app.cacheDir, CACHE_DIR_NAME).also { diskCacheDir = it }
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return dir
     }
 
-    /**
-     * Phân giải DNS trước cho các domain thiết yếu của YouTube để triệt tiêu độ trễ DNS lần đầu
-     */
-    fun warmupConnections(context: Context) {
-        Thread {
-            val domains = listOf(
-                "m.youtube.com",
-                "i.ytimg.com",
-                "s.ytimg.com",
-                "yt3.ggpht.com",
-                "fonts.gstatic.com"
-            )
-            for (domain in domains) {
-                try {
-                    InetAddress.getByName(domain)
-                } catch (_: Exception) {
-                    // Lỗi phân giải DNS bỏ qua an toàn
-                }
-            }
-        }.start()
+    private fun warmupDns() {
+        val domains = listOf(
+            "m.youtube.com",
+            "i.ytimg.com",
+            "s.ytimg.com",
+            "yt3.ggpht.com",
+            "fonts.gstatic.com"
+        )
+        for (domain in domains) {
+            try {
+                InetAddress.getByName(domain)
+            } catch (_: Exception) {}
+        }
     }
 
-    /**
-     * Kiểm tra URL và WebResourceRequest có phải là tài nguyên tĩnh bất biến cần cache hay không
-     */
+    internal fun isCacheableStaticUrl(url: String): Boolean {
+        if (url.isBlank()) return false
+        val parsed = UrlUtils.parseHttpUrl(url) ?: return false
+        val host = parsed.host
+        val lowerPath = parsed.path.lowercase(Locale.ROOT)
+
+        if (host.contains("googlevideo.com") || lowerPath.contains("/videoplayback")) {
+            return false
+        }
+
+        if (lowerPath.contains("/youtubei/v1/") ||
+            lowerPath.contains("/api/") ||
+            lowerPath.contains("/ptracking") ||
+            lowerPath.contains("/generate_204")
+        ) {
+            return false
+        }
+
+        if (!ALLOWED_HOSTS.contains(host)) {
+            return false
+        }
+
+        val matchesPattern = STATIC_PATH_PATTERNS.any { lowerPath.contains(it) }
+        val matchesExtension = STATIC_EXTENSIONS.any { lowerPath.endsWith(it) }
+        return matchesPattern || matchesExtension
+    }
+
     fun isCacheableStaticAsset(url: String, request: WebResourceRequest? = null): Boolean {
         if (!isEnabled) return false
-        if (url.isBlank()) return false
         if (request != null) {
-            // Chỉ cache phương thức GET
-            val method = request.method
-            if (!method.equals("GET", ignoreCase = true)) return false
-
-            // KHÔNG cache document HTML chính
+            if (!request.method.equals("GET", ignoreCase = true)) return false
             if (request.isForMainFrame) return false
         }
-
-        return try {
-            val uri = Uri.parse(url)
-            val host = uri.host?.lowercase() ?: return false
-            val path = uri.path?.lowercase() ?: ""
-
-            // KHÔNG cache luồng video/audio
-            if (host.contains("googlevideo.com") || path.contains("/videoplayback")) {
-                return false
-            }
-
-            // KHÔNG cache API động
-            if (path.contains("/youtubei/v1/") ||
-                path.contains("/api/") ||
-                path.contains("/ptracking") ||
-                path.contains("/generate_204")
-            ) {
-                return false
-            }
-
-            // CHỈ cache các tài nguyên tĩnh bất biến của YouTube & Google
-            if (!ALLOWED_HOSTS.contains(host)) {
-                return false
-            }
-
-            // Khớp một trong các mẫu tài nguyên tĩnh cốt lõi
-            val matchesPattern = STATIC_PATH_PATTERNS.any { path.contains(it) }
-            val matchesExtension = STATIC_EXTENSIONS.any { path.endsWith(it) }
-
-            matchesPattern || matchesExtension
-        } catch (_: Exception) {
-            false
-        }
+        return isCacheableStaticUrl(url)
     }
 
     /**
-     * Tạo khóa băm SHA-256 từ URL (chuẩn hóa loại bỏ query không cần thiết đối với asset dưới /s/)
+     * Kiểm tra MIME Type trả về có hợp lệ với tài nguyên tĩnh không (chống Captive Portal trả text/html 200 OK).
      */
+    internal fun isCompatibleMimeType(url: String, mimeType: String): Boolean {
+        val lowerMime = mimeType.lowercase(Locale.ROOT)
+        if (lowerMime.contains("text/html") || lowerMime.contains("application/xhtml")) {
+            return false
+        }
+        val lowerPath = UrlUtils.parseHttpUrl(url)?.path?.lowercase(Locale.ROOT) ?: url.lowercase(Locale.ROOT)
+        return when {
+            lowerPath.endsWith(".js") -> lowerMime.contains("javascript") || lowerMime.contains("ecmascript")
+            lowerPath.endsWith(".css") -> lowerMime.contains("text/css")
+            lowerPath.endsWith(".woff2") || lowerPath.endsWith(".woff") || lowerPath.endsWith(".ttf") ->
+                lowerMime.startsWith("font/") || lowerMime.contains("woff") || lowerMime.contains("truetype") || lowerMime.contains("octet-stream")
+            lowerPath.endsWith(".svg") -> lowerMime.contains("svg")
+            lowerPath.endsWith(".ico") -> lowerMime.contains("icon") || lowerMime.startsWith("image/")
+            else -> !lowerMime.startsWith("text/plain")
+        }
+    }
+
     fun getCacheKey(url: String): String {
-        return try {
-            val uri = Uri.parse(url)
-            val path = uri.path?.lowercase() ?: ""
-            val normalizedUrl = if (path.contains("/s/") && (path.endsWith(".woff2") || path.endsWith(".js") || path.endsWith(".css"))) {
-                val scheme = uri.scheme ?: "https"
-                val host = uri.host ?: ""
-                "$scheme://$host${uri.path}"
+        val parsed = UrlUtils.parseHttpUrl(url)
+        val normalizedUrl = if (parsed != null) {
+            val lowerPath = parsed.path.lowercase(Locale.ROOT)
+            if (lowerPath.contains("/s/") &&
+                (lowerPath.endsWith(".woff2") || lowerPath.endsWith(".js") || lowerPath.endsWith(".css"))
+            ) {
+                "${parsed.scheme}://${parsed.host}${parsed.path}"
             } else {
                 url
             }
-            sha256(normalizedUrl)
-        } catch (_: Exception) {
-            sha256(url)
+        } else {
+            url
         }
+        return sha256(normalizedUrl)
     }
 
     private fun sha256(input: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
+        val sb = StringBuilder(digest.size * 2)
+        for (b in digest) {
+            sb.append(String.format(Locale.ROOT, "%02x", b))
+        }
+        return sb.toString()
     }
 
-    /**
-     * Đánh chặn request mạng từ WebView:
-     * - Nếu có trong Memory hoặc Disk Cache -> Trả về WebResourceResponse ngay lập tức.
-     * - Nếu chưa có -> Tải qua HttpURLConnection, lưu vào Cache rồi trả về.
-     */
     fun intercept(request: WebResourceRequest?): WebResourceResponse? {
         if (!isEnabled || request == null) return null
         val url = request.url?.toString() ?: return null
-
-        if (!isCacheableStaticAsset(url, request)) {
-            return null
-        }
+        if (!isCacheableStaticAsset(url, request)) return null
 
         val key = getCacheKey(url)
+        val requestOrigin = request.requestHeaders?.entries
+            ?.firstOrNull { it.key.equals("Origin", ignoreCase = true) }
+            ?.value
 
-        // 1. Kiểm tra Memory Cache
-        val memoryCached = memoryCache.get(key)
-        if (memoryCached != null) {
-            return createWebResourceResponse(memoryCached)
+        memoryCache.get(key)?.let { cached ->
+            return createWebResourceResponse(cached, requestOrigin)
         }
 
-        // 2. Kiểm tra Disk Cache
-        val diskCached = readFromDisk(key)
-        if (diskCached != null) {
-            memoryCache.put(key, diskCached)
-            return createWebResourceResponse(diskCached)
-        }
+        // Single-flight lock theo từng key để tránh 2 WebView tải đúp cùng lúc
+        val lock = inFlightLocks.computeIfAbsent(key) { Any() }
+        try {
+            synchronized(lock) {
+                memoryCache.get(key)?.let { cached ->
+                    return createWebResourceResponse(cached, requestOrigin)
+                }
 
-        // 3. Tải từ mạng và nạp vào bộ đệm
-        return fetchAndCache(url, request, key)
+                readFromDisk(key)?.let { diskCached ->
+                    memoryCache.put(key, diskCached)
+                    return createWebResourceResponse(diskCached, requestOrigin)
+                }
+
+                val fetched = fetchAndCache(url, request, key)
+                if (fetched != null) {
+                    return createWebResourceResponse(fetched, requestOrigin)
+                }
+            }
+        } finally {
+            inFlightLocks.remove(key, lock)
+        }
+        return null
     }
 
     private fun fetchAndCache(
         url: String,
         request: WebResourceRequest,
         key: String
-    ): WebResourceResponse? {
+    ): CachedResource? {
         var connection: HttpURLConnection? = null
         try {
             val conn = URL(url).openConnection() as HttpURLConnection
@@ -271,32 +278,45 @@ object WebResourceCacheManager {
             conn.readTimeout = 8000
             conn.instanceFollowRedirects = true
 
-            // Kế thừa các header cần thiết từ request WebView (User-Agent, v.v.)
             request.requestHeaders?.forEach { (headerKey, headerValue) ->
                 if (!headerKey.equals("Host", ignoreCase = true) &&
                     !headerKey.equals("Content-Length", ignoreCase = true) &&
-                    !headerKey.equals("Accept-Encoding", ignoreCase = true)
+                    !headerKey.equals("Accept-Encoding", ignoreCase = true) &&
+                    !headerKey.equals("Range", ignoreCase = true)
                 ) {
                     conn.setRequestProperty(headerKey, headerValue)
                 }
             }
+            conn.setRequestProperty("Accept-Encoding", "gzip")
 
-            val responseCode = conn.responseCode
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                val rawContentType = conn.contentType
-                val (mimeType, encoding) = parseContentType(rawContentType, url)
+            if (conn.responseCode != HttpURLConnection.HTTP_OK) {
+                return null
+            }
 
-                val bytes = conn.inputStream.use { it.readBytes() }
-                if (bytes.isNotEmpty() && bytes.size <= MAX_FILE_SIZE_BYTES) {
-                    val cached = CachedResource(
-                        mimeType = mimeType,
-                        encoding = encoding,
-                        data = bytes
-                    )
-                    memoryCache.put(key, cached)
-                    saveToDisk(key, cached)
-                    return createWebResourceResponse(cached)
-                }
+            // Kiểm tra trước kích thước để không tải về RAM rồi vứt bỏ nếu vượt ngưỡng 4MB
+            val declaredLength = conn.contentLengthLong
+            if (declaredLength > MAX_FILE_SIZE_BYTES) {
+                return null
+            }
+
+            val (mimeType, encoding) = parseContentType(conn.contentType, url)
+            if (!isCompatibleMimeType(url, mimeType)) {
+                return null
+            }
+
+            val isGzip = "gzip".equals(conn.contentEncoding, ignoreCase = true)
+            val stream = if (isGzip) GZIPInputStream(conn.inputStream) else conn.inputStream
+            val bytes = stream.use { input -> readBoundedBytes(input, MAX_FILE_SIZE_BYTES) } ?: return null
+
+            if (bytes.isNotEmpty()) {
+                val cached = CachedResource(
+                    mimeType = mimeType,
+                    encoding = encoding,
+                    data = bytes
+                )
+                memoryCache.put(key, cached)
+                saveToDisk(key, cached)
+                return cached
             }
         } catch (e: Exception) {
             Log.w(TAG, "Lỗi nạp tài nguyên tĩnh ($url): ${e.message}")
@@ -308,10 +328,41 @@ object WebResourceCacheManager {
         return null
     }
 
-    private fun createWebResourceResponse(cached: CachedResource): WebResourceResponse {
-        val responseHeaders = mutableMapOf(
-            "Access-Control-Allow-Origin" to "*",
+    private fun readBoundedBytes(input: java.io.InputStream, maxBytes: Int): ByteArray? {
+        val out = java.io.ByteArrayOutputStream(16 * 1024)
+        val buffer = ByteArray(8 * 1024)
+        var total = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > maxBytes) {
+                return null
+            }
+            out.write(buffer, 0, read)
+        }
+        return out.toByteArray()
+    }
+
+    private fun createWebResourceResponse(
+        cached: CachedResource,
+        requestOrigin: String?
+    ): WebResourceResponse {
+        val allowedOrigin = if (!requestOrigin.isNullOrBlank()) {
+            val parsedOrigin = UrlUtils.parseHttpUrl(requestOrigin)
+            if (parsedOrigin != null && UrlUtils.isYouTubeHost(parsedOrigin.host)) {
+                "${parsedOrigin.scheme}://${parsedOrigin.host}"
+            } else {
+                "https://m.youtube.com"
+            }
+        } else {
+            "https://m.youtube.com"
+        }
+
+        val responseHeaders = mapOf(
+            "Access-Control-Allow-Origin" to allowedOrigin,
             "Access-Control-Allow-Methods" to "GET, OPTIONS",
+            "Vary" to "Origin",
             "Cache-Control" to "public, max-age=604800",
             "X-Cache-Lookup" to "HIT"
         )
@@ -339,18 +390,17 @@ object WebResourceCacheManager {
             val timestamp = metaJson.optLong("timestamp", 0L)
             val now = System.currentTimeMillis()
 
-            // Kiểm tra TTL 7 ngày
             if (now - timestamp > CACHE_TTL_MS) {
+                val removedBytes = binFile.length() + metaFile.length()
                 binFile.delete()
                 metaFile.delete()
+                addDiskDelta(-removedBytes)
                 return null
             }
 
             val mimeType = metaJson.optString("mimeType", "application/octet-stream")
             val encoding = metaJson.optString("encoding").ifEmpty { null }
             val bytes = binFile.readBytes()
-
-            // Cập nhật timestamp sửa đổi để phục vụ cơ chế LRU đĩa
             binFile.setLastModified(now)
 
             return CachedResource(
@@ -369,40 +419,67 @@ object WebResourceCacheManager {
     private fun saveToDisk(key: String, cached: CachedResource) {
         val dir = diskCacheDir ?: return
         try {
-            val tempBin = File(dir, "$key.bin.tmp")
+            if (!dir.exists()) {
+                dir.mkdirs()
+            }
+            val tid = Thread.currentThread().id
+            val tempBin = File(dir, "$key.$tid.bin.tmp")
             val finalBin = File(dir, "$key.bin")
-            val tempMeta = File(dir, "$key.meta.tmp")
+            val tempMeta = File(dir, "$key.$tid.meta.tmp")
             val finalMeta = File(dir, "$key.meta")
 
-            tempBin.writeBytes(cached.data)
+            val previousBytes = (if (finalBin.exists()) finalBin.length() else 0L) +
+                (if (finalMeta.exists()) finalMeta.length() else 0L)
 
-            val metaJson = JSONObject().apply {
+            tempBin.writeBytes(cached.data)
+            val metaBytes = JSONObject().apply {
                 put("mimeType", cached.mimeType)
                 put("encoding", cached.encoding ?: "")
                 put("timestamp", System.currentTimeMillis())
+            }.toString().toByteArray(Charsets.UTF_8)
+            tempMeta.writeBytes(metaBytes)
+
+            if (!tempBin.renameTo(finalBin)) {
+                tempBin.copyTo(finalBin, overwrite = true)
+                tempBin.delete()
             }
-            tempMeta.writeText(metaJson.toString(), Charsets.UTF_8)
+            if (!tempMeta.renameTo(finalMeta)) {
+                tempMeta.copyTo(finalMeta, overwrite = true)
+                tempMeta.delete()
+            }
 
-            tempBin.renameTo(finalBin)
-            tempMeta.renameTo(finalMeta)
-
-            if (getCacheSizeBytesInternal(dir) > MAX_DISK_CACHE_BYTES) {
-                trimDiskCache()
+            val addedBytes = (cached.data.size + metaBytes.size).toLong() - previousBytes
+            val estimatedTotal = addDiskDelta(addedBytes)
+            if (estimatedTotal > MAX_DISK_CACHE_BYTES) {
+                ioExecutor.execute { trimDiskCache() }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Lỗi ghi disk cache ($key): ${e.message}")
         }
     }
 
+    private fun addDiskDelta(delta: Long): Long {
+        val current = diskSizeBytes.get()
+        if (current < 0L) return 0L
+        return diskSizeBytes.addAndGet(delta).coerceAtLeast(0L)
+    }
+
     @Synchronized
     fun trimDiskCache() {
         val dir = diskCacheDir ?: return
         try {
+            if (!dir.exists()) {
+                diskSizeBytes.set(0L)
+                return
+            }
             val files = dir.listFiles() ?: return
             val now = System.currentTimeMillis()
 
-            // 1. Xóa file hết hạn TTL
             for (file in files) {
+                if (file.name.endsWith(".tmp")) {
+                    if (now - file.lastModified() > 60_000L) file.delete()
+                    continue
+                }
                 if (file.name.endsWith(".meta")) {
                     try {
                         val metaJson = JSONObject(file.readText(Charsets.UTF_8))
@@ -418,7 +495,6 @@ object WebResourceCacheManager {
                 }
             }
 
-            // 2. Dọn bớt file cũ nhất theo LRU nếu tổng dung lượng vượt quá MAX_DISK_CACHE_BYTES
             val currentFiles = dir.listFiles() ?: return
             var totalSize = currentFiles.sumOf { it.length() }
 
@@ -438,79 +514,22 @@ object WebResourceCacheManager {
                     bin.delete()
                 }
             }
+            diskSizeBytes.set(totalSize.coerceAtLeast(0L))
         } catch (e: Exception) {
             Log.w(TAG, "Lỗi dọn dẹp disk cache: ${e.message}")
         }
     }
 
-    /**
-     * Trả về tổng dung lượng cache đã lưu trên đĩa (bytes)
-     */
-    fun getCacheSizeBytes(context: Context): Long {
-        val dir = diskCacheDir ?: File(context.applicationContext.cacheDir, CACHE_DIR_NAME)
-        return getCacheSizeBytesInternal(dir)
-    }
-
-    private fun getCacheSizeBytesInternal(dir: File): Long {
-        return try {
-            if (!dir.exists()) return 0L
-            dir.listFiles()?.sumOf { it.length() } ?: 0L
-        } catch (_: Exception) {
-            0L
-        }
-    }
-
-    /**
-     * Xóa toàn bộ bộ nhớ đệm (Memory + Disk)
-     */
     fun clearCache(context: Context) {
         try {
             memoryCache.evictAll()
-            val dir = diskCacheDir ?: File(context.applicationContext.cacheDir, CACHE_DIR_NAME)
-            if (dir.exists()) {
-                dir.listFiles()?.forEach { it.delete() }
-            }
+            val dir = ensureCacheDir(context)
+            dir.listFiles()?.forEach { it.deleteRecursively() }
+            diskSizeBytes.set(0L)
             Log.d(TAG, "Đã xóa toàn bộ WebResourceCache (Memory + Disk)")
         } catch (e: Exception) {
             Log.e(TAG, "Lỗi xóa cache: ${e.message}")
         }
-    }
-
-    /**
-     * Trả về đoạn mã JavaScript preload chạy tại DOCUMENT_START để thiết lập kết nối trước
-     */
-    fun getPreloadScript(): String {
-        return """
-            (function() {
-                if (window.__brave_preload_installed) return;
-                window.__brave_preload_installed = true;
-                try {
-                    var domains = [
-                        'https://m.youtube.com',
-                        'https://i.ytimg.com',
-                        'https://s.ytimg.com',
-                        'https://yt3.ggpht.com',
-                        'https://fonts.gstatic.com'
-                    ];
-                    var target = document.head || document.documentElement;
-                    if (target) {
-                        for (var i = 0; i < domains.length; i++) {
-                            var d = domains[i];
-                            var lPre = document.createElement('link');
-                            lPre.rel = 'preconnect';
-                            lPre.href = d;
-                            lPre.crossOrigin = 'anonymous';
-                            target.appendChild(lPre);
-
-                            var lDns = document.createElement('link');
-                            lDns.rel = 'dns-prefetch';
-                            lDns.href = d;
-                            target.appendChild(lDns);
-                        }
-                    }
-                } catch (e) {}
-            })();
-        """.trimIndent()
     }
 
     private fun parseContentType(rawContentType: String?, url: String): Pair<String, String?> {
@@ -520,7 +539,7 @@ object WebResourceCacheManager {
         if (!rawContentType.isNullOrBlank()) {
             val parts = rawContentType.split(";").map { it.trim() }
             if (parts.isNotEmpty()) {
-                mimeType = parts[0].lowercase()
+                mimeType = parts[0].lowercase(Locale.ROOT)
             }
             for (part in parts) {
                 if (part.startsWith("charset=", ignoreCase = true)) {
@@ -533,7 +552,13 @@ object WebResourceCacheManager {
             mimeType = guessMimeType(url)
         }
 
-        if (encoding.isNullOrBlank() && (mimeType.startsWith("text/") || mimeType.contains("javascript") || mimeType.contains("json") || mimeType.contains("svg"))) {
+        if (encoding.isNullOrBlank() && (
+                mimeType.startsWith("text/") ||
+                    mimeType.contains("javascript") ||
+                    mimeType.contains("json") ||
+                    mimeType.contains("svg")
+                )
+        ) {
             encoding = "UTF-8"
         }
 
@@ -541,22 +566,18 @@ object WebResourceCacheManager {
     }
 
     private fun guessMimeType(url: String): String {
-        val path = try {
-            Uri.parse(url).path?.lowercase() ?: ""
-        } catch (_: Exception) {
-            url.lowercase()
-        }
+        val lowerPath = UrlUtils.parseHttpUrl(url)?.path?.lowercase(Locale.ROOT) ?: url.lowercase(Locale.ROOT)
         return when {
-            path.endsWith(".js") -> "application/javascript"
-            path.endsWith(".css") -> "text/css"
-            path.endsWith(".woff2") -> "font/woff2"
-            path.endsWith(".woff") -> "font/woff"
-            path.endsWith(".ttf") -> "font/ttf"
-            path.endsWith(".svg") -> "image/svg+xml"
-            path.endsWith(".ico") -> "image/x-icon"
-            path.endsWith(".png") -> "image/png"
-            path.endsWith(".jpg") || path.endsWith(".jpeg") -> "image/jpeg"
-            path.endsWith(".webp") -> "image/webp"
+            lowerPath.endsWith(".js") -> "application/javascript"
+            lowerPath.endsWith(".css") -> "text/css"
+            lowerPath.endsWith(".woff2") -> "font/woff2"
+            lowerPath.endsWith(".woff") -> "font/woff"
+            lowerPath.endsWith(".ttf") -> "font/ttf"
+            lowerPath.endsWith(".svg") -> "image/svg+xml"
+            lowerPath.endsWith(".ico") -> "image/x-icon"
+            lowerPath.endsWith(".png") -> "image/png"
+            lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg") -> "image/jpeg"
+            lowerPath.endsWith(".webp") -> "image/webp"
             else -> "application/octet-stream"
         }
     }

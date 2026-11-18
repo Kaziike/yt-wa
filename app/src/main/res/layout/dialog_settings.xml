@@ -21,7 +21,7 @@
             android:layout_height="4dp"
             android:layout_gravity="center_horizontal"
             android:layout_marginBottom="14dp"
-            android:background="@drawable/bg_floating_pill" />
+            android:background="@drawable/bg_bottom_sheet_handle" />
 
         <!-- Header -->
         <TextView

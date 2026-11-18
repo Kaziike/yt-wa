@@ -11,130 +11,100 @@
 
 ## 📖 Giới Thiệu Sản Phẩm
 
-**LiteTube** là ứng dụng Android thế hệ mới được thiết kế để mang đến trải nghiệm giải trí video đỉnh cao: **Siêu mượt, Siêu nhẹ, Tiết kiệm pin tối đa và Tuyệt đối không bị làm phiền bởi bất kỳ loại quảng cáo nào**.
-
-Thay vì phải gánh một ứng dụng chính thức cồng kềnh, và ngập tràn nội dung quảng cáo tài trợ, **LiteTube** kết hợp sức mạnh tối ưu phần cứng của Chromium WebView với **ý tưởng của Brave Browser**.
+**LiteTube** là ứng dụng Android gọn nhẹ mang lại trải nghiệm xem video mượt mà, tiết kiệm RAM/Pin tối đa và không bị làm phiền bởi quảng cáo. Ứng dụng kết hợp sức mạnh giải mã phần cứng của Chromium WebView với **kiến trúc phòng thủ Brave Shields 3 tầng** và **giao diện Native Sliding Sheet 2 tầng**.
 
 ---
 
-## ✨ Tính Năng
+## ✨ Tính Năng Nổi Bật
 
-### 🎬 1. Trình Phát Thu Nhỏ Trong App (In-App MiniPlayer 2 Tầng Độc Quyền)
-
-
----
-
-### 🛡️ 2. Hệ Thống Chặn Quảng Cáo
-
-
-
-
+### 🎬 1. Trình Phát Thu Nhỏ Trong App (In-App MiniPlayer 2 Tầng)
+* **2 Tầng WebView Độc Lập:** Tầng dưới (`Browse`) giữ nguyên vị trí cuộn bảng tin Trang chủ, Tìm kiếm và Kênh đăng ký; tầng trên (`Player Sheet`) trượt nổi mượt mà để phát video chất lượng cao.
+* **Vuốt Thu Nhỏ Thông Minh:** Kéo nhẹ mép trên video hoặc bấm nút thu nhỏ để co trình phát về thanh MiniPlayer gọn gàng ngay phía trên thanh điều hướng, vừa nghe/xem tiếp vừa tự do lướt tìm video khác.
+* **Hỗ Trợ Deep Link Chuẩn Native:** Mở link `youtube.com/watch` hoặc `youtu.be` từ bên ngoài sẽ tự động bật lớp Player nổi đè lên Trang chủ mà không nhân bản cửa sổ ứng dụng.
 
 ---
 
-### 📱 3. Picture-in-Picture (PiP) Mượt Mà & Phát Âm Thanh Khi Tắt Màn Hình
-* **Chế độ cửa sổ nổi PiP:** Vuốt về màn hình chính (Home) để video tự động thu nhỏ thành cửa sổ nổi. Cửa sổ PiP tự động khớp tỷ lệ chuẩn của video (16:9, 4:3 hoặc video dọc Shorts) và trang bị nút Play/Pause native độc lập.
-* **Công nghệ chống ngắt Micro-Seek:** Thoát và vào PiP liên tục mà không bao giờ bị dừng hình hay kẹt nút phát/tạm dừng.
-* **Phát trong nền (Background Playback):** Thoải mái nghe nhạc, podcast hoặc bài giảng khi tắt màn hình điện thoại mà âm thanh vẫn duy trì ổn định qua Foreground Service.
-
-
+### 🛡️ 2. Hệ Thống Chặn Quảng Cáo 3 Tầng (Brave Shields Model)
+* **Tầng 1 — Lọc Mạng Native `O(k)` (`AdBlockEngine`):** Chặn tức thì các tên miền và đường dẫn quảng cáo/telemetry (`doubleclick.net`, `google-analytics.com`, `youtube.com/api/stats/ads`, `qoe`, `play.google.com/log`...) ngay tại `shouldInterceptRequest`.
+* **Tầng 2 — Scriptlet Khử Quảng Cáo Event-Driven (`youtube_defuser.js`):** Tẩy sạch trường quảng cáo trong phản hồi JSON của InnerTube API và tự động vượt quảng cáo ghép luồng (SSAI) qua `MutationObserver` mà không tiêu tốn CPU khi xem bình thường, giữ nguyên tốc độ xem (`1.25x`, `1.5x`, `2x`) của người dùng.
+* **Tầng 3 — Làm Sạch Giao Diện (`cosmetic_rules.css`):** Loại bỏ banner tài trợ, thẻ quảng cáo xen kẽ và các hộp thoại nhắc mở ứng dụng chính thức, tuân thủ chính sách bảo mật TrustedHTML CSP.
 
 ---
 
-### ⚙️ 4. Menu Cài Đặt Tích Hợp Native Tinh Tế
-* Truy cập mục Cài đặt của ứng dụng ngay trong trang cài đặt tài khoản của YouTube (`https://m.youtube.com/select_site`).
-* Giao diện BottomSheet chuẩn Material Design cho phép bạn:
-  * Bật / tắt Chặn quảng cáo (AdBlock).
-  * Bật / tắt Phát âm thanh khi tắt màn hình (Background Play).
-  * Bật / tắt Tự động kích hoạt PiP khi ra màn hình chính.
-  * Bật / tắt Bộ nhớ đệm tài nguyên tĩnh (Static Cache).
-  * Xem dung lượng bộ nhớ đệm và 1 chạm xóa sạch cache để giải phóng bộ nhớ.
+### 📱 3. Picture-in-Picture (PiP) & Phát Âm Thanh Khi Tắt Màn Hình
+* **Cửa Sổ Nổi PiP 3 Nút Tiện Dụng:** Tự động khớp tỷ lệ khung hình thực tế của video với 3 nút điều khiển được bảo vệ bằng khóa phiên: **Nghe nền (Tai nghe) | Phát/Tạm dừng | Video tiếp theo**.
+* **Phát Trong Nền & MediaSession Toàn Diện (`MediaService`):** Điều khiển trực tiếp từ Màn hình khóa, Thanh thông báo (kèm ảnh bìa thumbnail nét cao), tai nghe Bluetooth/Smartwatch, và tự động tạm dừng khi rút tai nghe.
+* **Tiết Kiệm Pin Thông Minh (`KeepAliveWebView`):** Chỉ duy trì giải mã nền trên đúng WebView đang phát nhạc; tự động cho WebView ngủ và giải phóng bộ nhớ GPU khi tạm dừng hoặc đóng trình phát.
 
 ---
 
+### ⚙️ 4. Menu Cài Đặt Native & Bộ Nhớ Đệm Tĩnh Đa Tầng
+* Truy cập mục **Cài đặt LiteTube** ngay trong trang cài đặt tài khoản (`https://m.youtube.com/select_site`).
+* Tùy chỉnh tức thì qua `BottomSheetDialog` chuẩn Material:
+  * Bật / tắt Chặn quảng cáo & Tua SSAI.
+  * Bật / tắt Phát nhạc trong nền.
+  * Bật / tắt Tự động mở Video Popup (PiP).
+  * Bật / tắt Lưu đệm tài nguyên tĩnh (`WebResourceCacheManager` hỗ trợ Gzip, Single-flight & chống lỗi Captive Portal).
+  * Xem dung lượng thực tế và xóa sạch bộ nhớ đệm bất đồng bộ không gây giật giao diện.
 
+---
 
 ## 📥 Tải Về & Cài Đặt (Installation)
 
 ### Cách 1: Tải Bản Đóng Gói Sẵn (Khuyên dùng)
 1. Truy cập mục [**Releases**](https://github.com/Kaziike/yt-wa/releases) hoặc tab [**Actions**](https://github.com/Kaziike/yt-wa/actions) của kho lưu trữ này.
-2. Tải về file `.apk` mới nhất từ mục **Artifacts** (ví dụ: `YouTubeLite-Debug-APK`).
-3. Mở file `.apk` trên điện thoại Android của bạn và chọn **Cài đặt** (Nếu có thông báo, cho phép cài đặt ứng dụng từ nguồn này).
-4. Mở **LiteTube** và tận hưởng trải nghiệm xem video không giới hạn!
+2. Tải về file `.apk` mới nhất từ mục **Artifacts** (`LiteTube-Debug-APK`).
+3. Mở file `.apk` trên điện thoại Android (8.0+) để cài đặt và trải nghiệm!
 
----
-
-### Cách 2: Tự Biên Dịch Từ Mã Nguồn (Dành cho Lập trình viên)
-Yêu cầu: Máy tính đã cài đặt **Java 17 (JDK 17)** và **Android SDK Platform 34**.
+### Cách 2: Tự Biên Dịch Từ Mã Nguồn
+Yêu cầu: **JDK 17** và **Android SDK Platform 34**.
 
 ```bash
-# 1. Clone kho lưu trữ về máy tính
 git clone https://github.com/Kaziike/yt-wa.git
 cd yt-wa
 
-# 2. Biên dịch bản Debug APK
-# Trên Windows (PowerShell):
-.\gradlew.bat assembleDebug
-
-# Trên macOS / Linux:
+# Chạy kiểm thử đơn vị và đóng gói Debug APK
 chmod +x ./gradlew
-./gradlew assembleDebug
+./gradlew testDebugUnitTest assembleDebug
 ```
 
-File APK sau khi biên dịch sẽ xuất hiện tại:
-`app/build/outputs/apk/debug/app-debug.apk`
+File APK đầu ra nằm tại: `app/build/outputs/apk/debug/app-debug.apk`.
 
 ---
 
 ## 🏗️ Kiến Trúc Kỹ Thuật (Architecture Overview)
 
 ```
-┌────────────────────────────────────────────────────────┐
-│                   HỆ ĐIỀU HÀNH ANDROID                 │
-│      SystemUI (PiP Controls)  •  Notification Shade    │
-│      LockScreen MediaControls  •  PowerManager Lock    │
-└───────────────────────────┬────────────────────────────┘
-                            │
-┌───────────────────────────▼────────────────────────────┐
-│                  TẦNG NATIVE ANDROID (KOTLIN)          │
-│   • MainActivity: Điều phối 2 Tầng View & Cử chỉ       │
-│   • Layer 1 (Browse): SwipeRefreshLayout + KeepAlive   │
-│   • Layer 2 (Player): playerPanel + MiniPlayerBar      │
-│   • AdBlockEngine: Chặn domain quảng cáo O(1)          │
-│   • WebResourceCacheManager: Cache tài nguyên tĩnh     │
-│   • MediaService: Quản lý MediaSession & WakeLock      │
-│   • AppSettings: Lưu cấu hình SharedPreferences        │
-└───────────────────────────┬────────────────────────────┘
-                            │ IPC Bridge (JavascriptInterface)
-┌───────────────────────────▼────────────────────────────┐
-│               TẦNG WEB SHIELDS (JAVASCRIPT / CSS)      │
-│   • browseWatchInterceptor: Bắt click & SPA pushState  │
-│   • youtube_defuser: Tua 16x SSAI, gọt sạch InnerTube  │
-│   • pip_controller: Cô lập video PiP & Micro-Seek      │
-│   • cosmetic_rules: Xóa bỏ banner tài trợ bằng CSS     │
-│   • selectSiteSettings: Nhét menu cài đặt vào web      │
-└────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                     HỆ ĐIỀU HÀNH ANDROID                     │
+│     SystemUI (PiP Actions) • MediaSession & LockScreen       │
+│     AudioNoisy Broadcast   • PowerManager Partial WakeLock   │
+└──────────────────────────────┬───────────────────────────────┘
+                               │
+┌──────────────────────────────▼───────────────────────────────┐
+│                  TẦNG NATIVE ANDROID (KOTLIN)                │
+│  • MainActivity: Điều phối vòng đời singleTask & Deep Link   │
+│  • PlayerSheetController: Sliding Sheet, MiniPlayer Gestures │
+│  • PipController & FullscreenController: PiP & Xoay màn hình │
+│  • PlaybackCoordinator & MediaService: Đồng bộ MediaSession  │
+│  • AdBlockEngine & WebResourceCacheManager: Lọc O(k) & Cache │
+└──────────────────────────────┬───────────────────────────────┘
+                               │ WebBridge (JavascriptInterface)
+┌──────────────────────────────▼───────────────────────────────┐
+│              TẦNG WEB SHIELDS (ASSETS SCRIPTLETS)            │
+│  • yt_core_bridge.js: State Machine & IPC tiết lưu sự kiện   │
+│  • youtube_defuser.js: Khử InnerTube, SSAI & Auto-Unmute     │
+│  • pip_controller.js: Cô lập DOM PiP & Resync trình phát     │
+│  • browse_interceptor.js: Bắt SPA Watch & Cài đặt select_site│
+│  • cosmetic_rules.css & player_ui.css: Làm sạch giao diện    │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-> 📚 Xem toàn bộ tài liệu kiến trúc, hướng dẫn mã nguồn và luồng dữ liệu chuyên sâu tại [**Thư mục Tài Liệu Kỹ Thuật (`docs/`)**](./docs/README.md).
+> 📚 Xem tài liệu kiến trúc, luồng dữ liệu và hướng dẫn bảo trì chi tiết tại [**Thư mục Tài Liệu Kỹ Thuật (`docs/`)**](./docs/README.md).
 
 ---
 
-## 🔒 Cam Kết Quyền Riêng Tư & Bảo Mật
+## 🔒 Quyền Riêng Tư & Miễn Trừ Trách Nhiệm
 
-* **Không theo dõi (Zero Telemetry):** Ứng dụng không chứa bất kỳ SDK phân tích hành vi người dùng, theo dõi vị trí hay gửi dữ liệu về máy chủ bên thứ ba.
-* **Mã nguồn mở minh bạch:** Toàn bộ mã nguồn Kotlin, JavaScript và CSS đều mở và có thể kiểm chứng độc lập.
-* **Tài khoản an toàn:** Mọi thao tác đăng nhập Google (nếu bạn sử dụng) đều diễn ra trực tiếp bên trong Chromium Web Engine của Google, thông tin tài khoản được lưu trữ an toàn trong Cookie Container của thiết bị.
-
----
-
-## ⚖️ Tuyên Bố Miễn Trừ Trách Nhiệm (Disclaimer)
-
-* **LiteTube** là một dự án phần mềm mã nguồn mở độc lập, phi thương mại phục vụ mục đích nghiên cứu công nghệ tối ưu hóa tài nguyên phần cứng di động và duyệt web an toàn.
-
-
----
-
-<p align="center">
-  Được phát triển với tâm huyết dành cho cộng đồng yêu thích sự tinh giản và tự do công nghệ. ⭐ Hãy nhấn <b>Star</b> cho dự án nếu bạn thấy hữu ích!
-</p>
+* **Không theo dõi (Zero Telemetry):** Ứng dụng không chứa bất kỳ SDK phân tích hay thu thập dữ liệu bên thứ ba nào; thông tin đăng nhập (nếu sử dụng) nằm hoàn toàn trong hộp cát Cookie của Android System WebView trên thiết bị của bạn.
+* **Mã nguồn mở phi thương mại:** Dự án phục vụ mục đích học tập, nghiên cứu tối ưu hóa hiệu năng WebView và kiến trúc trình duyệt an toàn trên thiết bị di động.

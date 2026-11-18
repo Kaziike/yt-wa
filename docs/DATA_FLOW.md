@@ -113,12 +113,12 @@ sequenceDiagram
     participant WebView as Chromium Web Engine
     participant Client as AppWebViewClient (shouldInterceptRequest)
     participant CacheMgr as WebResourceCacheManager
-    participant Disk as Bộ nhớ cục bộ (cache/web_static/)
+    participant Disk as Bộ nhớ cục bộ (cacheDir/yt_static_cache/)
     participant Network as Máy chủ YouTube CDN
 
     WebView->>Client: shouldInterceptRequest(url)
     Client->>CacheMgr: WebResourceCacheManager.intercept(request)
-    CacheMgr->>CacheMgr: Tính MD5(url) & kiểm tra loại file tĩnh
+    CacheMgr->>CacheMgr: Tính SHA-256(url) & kiểm tra loại file tĩnh
     alt Đã tồn tại trong Disk Cache
         CacheMgr->>Disk: Đọc file nhị phân từ ổ đĩa
         Disk-->>CacheMgr: Trả về InputStream

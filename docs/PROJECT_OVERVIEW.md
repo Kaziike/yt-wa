@@ -44,9 +44,9 @@ Dự án được tinh gọn tối đa, chỉ phụ thuộc vào các thư việ
 | `androidx.appcompat:appcompat` | `1.6.1` | Hỗ trợ Activity hiện đại (`AppCompatActivity`), theme tương thích từ API 26. |
 | `com.google.android.material:material` | `1.11.0` | Cung cấp BottomSheetDialog, MaterialButton, SwitchMaterial cho menu Cài đặt Native. |
 | `androidx.swiperefreshlayout:swiperefreshlayout` | `1.1.0` | Cung cấp cử chỉ kéo từ trên xuống để làm mới trang (Swipe-to-Refresh). |
-| `androidx.constraintlayout:constraintlayout` | `2.1.4` | Tùy chọn bố cục linh hoạt khi mở rộng giao diện. |
 | `androidx.media:media` | `1.7.0` | Quản lý `MediaSessionCompat` và notification điều khiển media hệ thống (`NotificationCompat.MediaStyle`). |
-| `androidx.webkit:webkit` | `1.10.0` | **Thành phần cốt lõi:** Cho phép sử dụng `WebViewCompat.addDocumentStartJavaScript` để tiêm Scriptlet tại `DOCUMENT_START`. |
+| `androidx.webkit:webkit` | `1.10.0` | **Thành phần cốt lõi:** Cho phép sử dụng `WebViewCompat.addDocumentStartJavaScript` kèm `ScriptHandler` để tiêm Scriptlet an toàn theo đúng origin tại `DOCUMENT_START`. |
+| `junit:junit` *(test)* | `4.13.2` | Kiểm thử đơn vị tự động cho `AdBlockEngine`, `UrlUtils` và `WebResourceCacheManager`. |
 
 ---
 
