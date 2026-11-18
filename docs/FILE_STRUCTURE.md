@@ -45,15 +45,16 @@ LiteTube/
 │       │   │   │   ├── FullscreenController.kt   # Quản lý toàn màn hình video cho cả 2 tầng WebView
 │       │   │   │   └── SettingsBottomSheet.kt    # Hộp thoại cài đặt Material sử dụng ViewBinding
 │       │   │   └── view/
+│       │   │       ├── DraggablePlayerLayout.kt  # FrameLayout bắt cử chỉ kéo xuống trên toàn bộ khung video
 │       │   │       └── KeepAliveWebView.kt       # WebView giữ sống nền theo ngữ cảnh & hủy sạch chống leak
 │       │   └── res/
 │       │       ├── drawable/
-│       │       │   ├── bg_bottom_sheet_handle.xml# Thanh kéo cho BottomSheet Cài đặt
-│       │       │   ├── bg_cache_card.xml         # Nền khung thông tin bộ nhớ đệm
-│       │       │   ├── ic_chevron_down.xml       # Nút thu nhỏ trình phát về MiniPlayer
-│       │       │   ├── ic_pip_headphones.xml     # Nút chuyển từ PiP sang chỉ nghe âm thanh nền
-│       │       │   ├── ic_stat_litetube.xml      # Icon đơn sắc trên thanh trạng thái cho Media Notification
-│       │       │   └── ic_launcher_*.xml         # Adaptive icon của ứng dụng
+│       │       │   ├── bg_bottom_sheet_handle.xml    # Thanh kéo cho BottomSheet Cài đặt
+│       │       │   ├── bg_cache_card.xml             # Nền khung thông tin bộ nhớ đệm
+│       │       │   ├── bg_miniplayer_video_mask.xml  # Khung viền che gọn ô video thu nhỏ trên MiniPlayer
+│       │       │   ├── ic_pip_headphones.xml         # Nút chuyển từ PiP sang chỉ nghe âm thanh nền
+│       │       │   ├── ic_stat_litetube.xml          # Icon đơn sắc trên thanh trạng thái cho Media Notification
+│       │       │   └── ic_launcher_*.xml             # Adaptive icon của ứng dụng
 │       │       ├── layout/
 │       │       │   ├── activity_main.xml         # Bố cục 2 tầng (SwipeRefresh Browse + Sliding Player Sheet)
 │       │       │   └── dialog_settings.xml       # Giao diện BottomSheet Cài đặt

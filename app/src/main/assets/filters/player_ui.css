@@ -1,49 +1,52 @@
 /* ==============================================================
    GIAO DIỆN TRÌNH PHÁT VIDEO (CHỈ TIÊM TRÊN PLAYER WEBVIEW)
-   Ẩn triệt để thanh header YouTube Mobile (kể cả khung skeleton ban đầu
-   trước khi video phát) và dải tiêu đề trên của trình phát nhúng.
+   1. Giữ nguyên thanh ytm-mobile-topbar-renderer cao 48px chuẩn gốc của YouTube
+      để khung video, thanh chip ("Tất cả", "Video có liên quan") và khung bình luận
+      khớp vị trí 100% tự nhiên không lệch 1 pixel nào.
+   2. Ẩn toàn bộ cụm nút bên phải topbar (Tìm kiếm, 3 chấm, Mở ứng dụng, Đăng nhập),
+      chỉ giữ lại duy nhất Logo YouTube bên trái làm nút thu nhỏ về MiniPlayer.
    ============================================================== */
 
+/* Giữ thanh topbar luôn cố định 48px nền #0f0f0f phía trên video để bấm Logo thu nhỏ mọi lúc */
 html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer,
-html:not([data-brave-pip-mode]) ytm-header-bar,
-html:not([data-brave-pip-mode]) #header-bar,
-html:not([data-brave-pip-mode]) header.mobile-topbar-header,
-html:not([data-brave-pip-mode]) .mobile-topbar-header,
-html:not([data-brave-pip-mode]) .mobile-topbar-header-background,
-html:not([data-brave-pip-mode]) .mobile-topbar-header-content,
-html:not([data-brave-pip-mode]) .watch-skeleton #header-bar,
-html:not([data-brave-pip-mode]) .skeleton-light-border-bottom,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer.sticky-player,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer.sticky-player.out,
+html:not([data-brave-pip-mode]) #header-bar {
+    top: 0 !important;
+    transform: none !important;
+    -webkit-transform: none !important;
+    background-color: #0f0f0f !important;
+}
+
+html:not([data-brave-pip-mode]) .mobile-topbar-header[data-mode="watch"] {
+    background-color: #0f0f0f !important;
+    box-shadow: none !important;
+}
+
+/* Đảm bảo Logo YouTube bên trái luôn nhận thao tác chạm để thu về MiniPlayer */
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer ytm-home-logo,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer .mobile-topbar-header-endpoint,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer .logo-in-player-endpoint {
+    pointer-events: auto !important;
+    cursor: pointer !important;
+}
+
+/* Ẩn triệt để phần Tìm kiếm, menu 3 chấm / Avatar, Voice search và nút phụ bên phải topbar */
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer .mobile-topbar-header-content,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer .topbar-button-search-button,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer .topbar-menu-button-avatar-button,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer .mobile-topbar-header-sign-in-button,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer .mobile-topbar-header-voice-search-button,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer ytm-menu,
+html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer yt-searchbox,
 html:not([data-brave-pip-mode]) .ytp-chrome-top,
 html:not([data-brave-pip-mode]) .ytp-title,
 html:not([data-brave-pip-mode]) .ytp-chrome-top-buttons {
     display: none !important;
     visibility: hidden !important;
     opacity: 0 !important;
+    width: 0 !important;
     height: 0 !important;
-    min-height: 0 !important;
-    max-height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    border: 0 !important;
     overflow: hidden !important;
     pointer-events: none !important;
-}
-
-html:not([data-brave-pip-mode]) body,
-html:not([data-brave-pip-mode]) #app,
-html:not([data-brave-pip-mode]) ytm-app,
-html:not([data-brave-pip-mode]) ytm-watch,
-html:not([data-brave-pip-mode]) .page-container,
-html:not([data-brave-pip-mode]) ytm-page-manager,
-html:not([data-brave-pip-mode]) .watch-below-the-player {
-    padding-top: 0 !important;
-    margin-top: 0 !important;
-}
-
-html:not([data-brave-pip-mode]) #player-container-id,
-html:not([data-brave-pip-mode]) .player-container.sticky-player,
-html:not([data-brave-pip-mode]) .player-size,
-html:not([data-brave-pip-mode]) #player-cinematics-container {
-    top: 0 !important;
-    margin-top: 0 !important;
 }

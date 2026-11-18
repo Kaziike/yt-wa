@@ -18,8 +18,8 @@
 
     </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
-    <!-- 2. TẦNG TRÊN: Lớp phát Video trượt đè lên (Sliding Video Player Layer) -->
-    <FrameLayout
+    <!-- 2. TẦNG TRÊN: Lớp phát Video trượt đè lên (hỗ trợ kéo xuống toàn vùng video & bấm Logo thu nhỏ) -->
+    <com.brave.youtubelite.view.DraggablePlayerLayout
         android:id="@+id/playerPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -31,28 +31,6 @@
             android:id="@+id/playerWebView"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
-
-        <!-- Nút thu nhỏ player (mũi tên chúc xuống) khi xem full video -->
-        <ImageButton
-            android:id="@+id/btnMinimizePlayer"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:layout_gravity="top|start"
-            android:layout_margin="10dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:src="@drawable/ic_chevron_down"
-            android:contentDescription="@string/desc_minimize_player"
-            android:tint="@color/white" />
-
-        <!-- Lớp phủ bắt cử chỉ vuốt kéo trên khu vực mép trên giữa của video khi xem to (chừa góc phải cho nút Cài đặt/Phụ đề player) -->
-        <View
-            android:id="@+id/playerDragArea"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_gravity="top"
-            android:layout_marginStart="56dp"
-            android:layout_marginEnd="108dp"
-            android:background="@android:color/transparent" />
 
         <!-- Thanh điều khiển MiniPlayer hiển thị ở đáy khi thu nhỏ -->
         <LinearLayout
@@ -66,13 +44,11 @@
             android:orientation="horizontal"
             android:visibility="gone">
 
-            <!-- Khoảng trống trong suốt để lộ video 16:9 thu nhỏ -->
+            <!-- Ô cửa sổ trong suốt 104x58dp (viền chắn 3dp #212121 che mép topbar/tiêu đề) để lộ video thu nhỏ -->
             <View
-                android:layout_width="104dp"
-                android:layout_height="58dp"
-                android:layout_marginStart="4dp"
-                android:layout_marginEnd="6dp"
-                android:background="@android:color/transparent" />
+                android:layout_width="110dp"
+                android:layout_height="64dp"
+                android:background="@drawable/bg_miniplayer_video_mask" />
 
             <!-- Khối nền xám đen chứa thông tin video và nút điều khiển -->
             <LinearLayout
@@ -81,7 +57,8 @@
                 android:background="#212121"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="6dp">
+                android:paddingStart="8dp"
+                android:paddingEnd="6dp">
 
                 <!-- Tiêu đề và tên kênh -->
                 <LinearLayout
@@ -138,7 +115,7 @@
 
         </LinearLayout>
 
-    </FrameLayout>
+    </com.brave.youtubelite.view.DraggablePlayerLayout>
 
     <!-- Thanh tiến trình tải trang siêu mỏng -->
     <ProgressBar

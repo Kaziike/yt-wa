@@ -325,6 +325,12 @@ class MainActivity : AppCompatActivity(), WebBridge.Listener {
         openWatchVideo(rawUrl)
     }
 
+    override fun onMinimizePlayer() {
+        runOnUiThread {
+            playerSheet.collapse()
+        }
+    }
+
     override fun onOpenSettings() {
         runOnUiThread {
             SettingsBottomSheet.show(

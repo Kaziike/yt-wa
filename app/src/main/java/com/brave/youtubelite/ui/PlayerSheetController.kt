@@ -15,10 +15,9 @@ import kotlin.math.abs
 
 /**
  * Quản lý chuyên biệt Tầng Phát Video Trượt (Sliding Video Player Sheet & MiniPlayer):
- * - Xử lý trạng thái HIDDEN / EXPANDED / COLLAPSED.
- * - Khi vào PiP từ MiniPlayer (prepareForPip): chuyển ngay state sang EXPANDED kèm cờ isInPipMode = true,
- *   ẩn hoàn toàn tầng Browse, mở khóa kích thước playerWebView và gắn listener đồng bộ khung hình ngay khi
- *   cửa sổ co về kích thước PiP (ngăn chặn tuyệt đối onConfigurationChanged tự thu nhỏ lại thành MiniPlayer trong PiP).
+ * - Hỗ trợ kéo từ trên xuống trên TOÀN BỘ khu vực video (và thanh topbar) thông qua DraggablePlayerLayout,
+ *   hoặc chạm vào Logo YouTube bên trái thanh topbar để thu nhỏ về MiniPlayer.
+ * - Bảo toàn nguyên vẹn thao tác chạm điều khiển video, tua ngang seekbar và cuộn danh sách gợi ý bên dưới.
  */
 class PlayerSheetController(
     private val binding: ActivityMainBinding,
@@ -41,6 +40,7 @@ class PlayerSheetController(
     private var wasCollapsedBeforePip = false
     private var lastMiniIconPlaying: Boolean? = null
     private var lastBottomNavPx: Int = dpToPx(48f).toInt()
+    private var measuredVideoBottomPx: Float = 0f
     private var pendingLayoutListener: View.OnLayoutChangeListener? = null
     private var pipViewportListener: View.OnLayoutChangeListener? = null
 
@@ -53,52 +53,31 @@ class PlayerSheetController(
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupGestures() {
-        binding.btnMinimizePlayer.setOnClickListener {
-            collapse()
+        // Kéo vuốt xuống trên toàn bộ khu vực video & thanh topbar để thu về MiniPlayer
+        binding.playerPanel.canDragDown = {
+            state == PanelState.EXPANDED && !isInPipMode
         }
-
-        var dragStartY = 0f
-        var isDragging = false
-        binding.playerDragArea.setOnTouchListener { _, event ->
-            if (state != PanelState.EXPANDED || isInPipMode) return@setOnTouchListener false
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    dragStartY = event.rawY
-                    isDragging = false
-                    true
+        binding.playerPanel.videoZoneBottomProvider = {
+            val w = binding.playerPanel.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+            val defaultZoneBottom = dpToPx(52f) + w * 9f / 16f
+            maxOf(defaultZoneBottom, measuredVideoBottomPx)
+        }
+        binding.playerPanel.onDragOffset = { deltaY ->
+            if (state == PanelState.EXPANDED && !isInPipMode) {
+                binding.playerPanel.translationY = deltaY
+            }
+        }
+        binding.playerPanel.onDragFinished = { shouldCollapse ->
+            if (state == PanelState.EXPANDED && !isInPipMode) {
+                if (shouldCollapse) {
+                    collapse()
+                } else {
+                    expand(fromDragSnapBack = true)
                 }
-                MotionEvent.ACTION_MOVE -> {
-                    val deltaY = event.rawY - dragStartY
-                    if (deltaY > dpToPx(12f) || isDragging) {
-                        isDragging = true
-                        binding.playerPanel.translationY = deltaY.coerceAtLeast(0f)
-                    }
-                    isDragging
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (isDragging) {
-                        val deltaY = event.rawY - dragStartY
-                        isDragging = false
-                        if (deltaY > dpToPx(80f)) collapse() else expand(fromDragSnapBack = true)
-                    } else {
-                        collapse()
-                    }
-                    true
-                }
-                MotionEvent.ACTION_CANCEL -> {
-                    if (isDragging) {
-                        isDragging = false
-                        binding.playerPanel.animate()
-                            .translationY(0f)
-                            .setDuration(150)
-                            .start()
-                    }
-                    true
-                }
-                else -> false
             }
         }
 
+        // Chạm hoặc vuốt ngược lên trên thanh MiniPlayer để bung to lại
         var miniStartX = 0f
         var miniStartY = 0f
         var miniSwipedUp = false
@@ -152,6 +131,7 @@ class PlayerSheetController(
         isInPipMode = false
         state = PanelState.EXPANDED
         wasCollapsedBeforePip = false
+        measuredVideoBottomPx = 0f
 
         binding.swipeRefreshLayout.visibility = View.VISIBLE
         val params = binding.playerPanel.layoutParams as FrameLayout.LayoutParams
@@ -163,7 +143,7 @@ class PlayerSheetController(
         binding.playerPanel.layoutParams = params
         binding.playerPanel.setBackgroundColor(Color.BLACK)
 
-        binding.playerPanel.animate().cancel()
+        binding.playerPanel.animate().withEndAction(null).cancel()
         binding.playerPanel.visibility = View.VISIBLE
         binding.playerPanel.translationY = 0f
 
@@ -173,8 +153,6 @@ class PlayerSheetController(
         binding.tvMiniPlayerTitle.text = "LiteTube"
         binding.tvMiniPlayerChannel.text = ""
         binding.miniPlayerBar.visibility = View.GONE
-        binding.btnMinimizePlayer.visibility = View.VISIBLE
-        binding.playerDragArea.visibility = View.VISIBLE
 
         binding.playerWebView.loadUrl(watchUrl)
     }
@@ -190,8 +168,6 @@ class PlayerSheetController(
 
         binding.miniPlayerBar.visibility = View.VISIBLE
         binding.miniPlayerBar.alpha = 1f
-        binding.btnMinimizePlayer.visibility = View.GONE
-        binding.playerDragArea.visibility = View.GONE
 
         binding.webView.evaluateJavascript(
             "(function(){return window.__liteTube?String(window.__liteTube.getBottomBarHeight()):'48';})()"
@@ -206,7 +182,9 @@ class PlayerSheetController(
                 "(function(){return window.__liteTube?window.__liteTube.measureVideoRect():'';})()"
             ) { rectRes ->
                 if (isInPipMode || state != PanelState.COLLAPSED) return@evaluateJavascript
-                animateToMini(fullW, fullH, lastBottomNavPx.toFloat(), parseVideoRect(rectRes), animate = true)
+                val parsedRect = parseVideoRect(rectRes)
+                updateMeasuredVideoBottom(fullW, parsedRect)
+                animateToMini(fullW, fullH, lastBottomNavPx.toFloat(), parsedRect, animate = true)
             }
         }
     }
@@ -225,7 +203,7 @@ class PlayerSheetController(
         if (wasCollapsed) {
             lockPlayerWebViewSize(fullW, fullH)
             val startTransY = (fullH - lastBottomNavPx - miniH).coerceAtLeast(0f)
-            binding.playerPanel.animate().cancel()
+            binding.playerPanel.animate().withEndAction(null).cancel()
             val params = binding.playerPanel.layoutParams as FrameLayout.LayoutParams
             params.width = ViewGroup.LayoutParams.MATCH_PARENT
             params.height = ViewGroup.LayoutParams.MATCH_PARENT
@@ -238,8 +216,6 @@ class PlayerSheetController(
         }
 
         binding.miniPlayerBar.visibility = View.GONE
-        binding.btnMinimizePlayer.visibility = View.VISIBLE
-        binding.playerDragArea.visibility = View.VISIBLE
 
         binding.playerPanel.animate()
             .translationY(0f)
@@ -249,6 +225,7 @@ class PlayerSheetController(
                 if (state != PanelState.EXPANDED || isInPipMode) return@withEndAction
                 unlockPlayerWebViewSize()
                 onRequestResync()
+                refreshMeasuredVideoBounds()
             }
             .start()
 
@@ -272,9 +249,10 @@ class PlayerSheetController(
         state = PanelState.HIDDEN
         wasCollapsedBeforePip = false
         lastMiniIconPlaying = null
+        measuredVideoBottomPx = 0f
 
         val targetY = binding.mainContainer.height.toFloat()
-        binding.playerPanel.animate().cancel()
+        binding.playerPanel.animate().withEndAction(null).cancel()
         binding.playerPanel.animate()
             .translationY(targetY)
             .setDuration(200)
@@ -310,15 +288,31 @@ class PlayerSheetController(
             binding.btnMiniPlayerPlayPause.setImageResource(
                 if (playback.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
             )
+            if (playback.isPlaying && state == PanelState.EXPANDED && !isInPipMode) {
+                refreshMeasuredVideoBounds()
+            }
         }
     }
 
-    /**
-     * Chuẩn bị giao diện để cửa sổ PiP hiển thị trọn vẹn 100% khung hình video:
-     * - Chuyển state từ COLLAPSED -> EXPANDED ngay lập tức để khóa cứng mọi hành vi thu nhỏ của MiniPlayer.
-     * - Ẩn hoàn toàn tầng Browse, hủy toàn bộ scale/translation và mở khóa kích thước cố định của playerWebView.
-     * - Lắng nghe thay đổi kích thước thật của playerWebView khi co về khung PiP để đồng bộ lại viewport.
-     */
+    private fun refreshMeasuredVideoBounds() {
+        val w = binding.mainContainer.width
+        if (w <= 0) return
+        binding.playerWebView.evaluateJavascript(
+            "(function(){return window.__liteTube?window.__liteTube.measureVideoRect():'';})()"
+        ) { rectRes ->
+            updateMeasuredVideoBottom(w, parseVideoRect(rectRes))
+        }
+    }
+
+    private fun updateMeasuredVideoBottom(fullW: Int, rect: FloatArray?) {
+        if (rect == null || fullW <= 0) return
+        val ratio = if (rect[4] > 0f) fullW / rect[4] else resources.displayMetrics.density
+        val bottomPx = (rect[1] + rect[3]) * ratio
+        if (bottomPx > dpToPx(80f)) {
+            measuredVideoBottomPx = bottomPx
+        }
+    }
+
     fun prepareForPip(onPipViewportChanged: (() -> Unit)? = null) {
         clearPendingLayoutListener()
         isInPipMode = true
@@ -334,7 +328,6 @@ class PlayerSheetController(
             state = PanelState.EXPANDED
         }
 
-        // Ẩn hoàn toàn tầng Browse bên dưới để cửa sổ PiP chỉ vẽ duy nhất playerWebView
         binding.swipeRefreshLayout.visibility = View.GONE
 
         binding.playerPanel.animate().withEndAction(null).cancel()
@@ -352,8 +345,6 @@ class PlayerSheetController(
         binding.playerPanel.visibility = View.VISIBLE
 
         binding.miniPlayerBar.visibility = View.GONE
-        binding.btnMinimizePlayer.visibility = View.GONE
-        binding.playerDragArea.visibility = View.GONE
 
         resetPlayerWebViewTransform()
         binding.playerWebView.scrollTo(0, 0)
@@ -375,9 +366,6 @@ class PlayerSheetController(
         }
     }
 
-    /**
-     * Khôi phục giao diện sau khi thoát khỏi cửa sổ PiP bằng sự kiện kích thước thật của màn hình thiết bị.
-     */
     fun restoreFromPip(restoreMiniIfWasCollapsed: Boolean, isFullscreen: Boolean) {
         clearPendingLayoutListener()
         clearPipViewportListener()
@@ -390,8 +378,6 @@ class PlayerSheetController(
         if (wasCollapsedBeforePip) {
             wasCollapsedBeforePip = false
             state = PanelState.EXPANDED
-            binding.btnMinimizePlayer.visibility = View.VISIBLE
-            binding.playerDragArea.visibility = View.VISIBLE
 
             if (restoreMiniIfWasCollapsed && !isFullscreen) {
                 waitForFullWindowThen {
@@ -400,16 +386,9 @@ class PlayerSheetController(
                     }
                 }
             }
-        } else if (state == PanelState.EXPANDED) {
-            binding.btnMinimizePlayer.visibility = View.VISIBLE
-            binding.playerDragArea.visibility = View.VISIBLE
         }
     }
 
-    /**
-     * Tính toán lại kích thước khóa và vị trí thu nhỏ của MiniPlayer khi xoay màn hình / chia đôi màn hình
-     * (tuyệt đối KHÔNG chạy khi đang ở chế độ PiP).
-     */
     fun onConfigurationChanged() {
         if (isInPipMode || state != PanelState.COLLAPSED) return
         clearPendingLayoutListener()
@@ -451,7 +430,6 @@ class PlayerSheetController(
     }
 
     private fun waitForFullWindowThen(action: () -> Unit) {
-        // Dùng kích thước màn hình vật lý thật (Resources.getSystem()) thay vì metrics của cửa sổ PiP
         val sysMetrics = Resources.getSystem().displayMetrics
         val minFullWindowSide = (minOf(sysMetrics.widthPixels, sysMetrics.heightPixels) * 0.8f).toInt()
         val minExpandedHeightPx = maxOf(dpToPx(420f).toInt(), minFullWindowSide)
@@ -505,11 +483,12 @@ class PlayerSheetController(
         val miniH = dpToPx(64f)
         val boxW = dpToPx(104f)
         val boxH = dpToPx(58f)
-        val boxLeft = dpToPx(4f)
+        val boxLeft = dpToPx(3f) // Khớp khít viền 3dp của bg_miniplayer_video_mask (3 + 104 + 3 = 110dp)
         val targetY = (fullH - bottomNavH - miniH).coerceAtLeast(0f)
 
+        // Mặc định: player nằm ngay dưới thanh topbar 48dp, tỉ lệ 16:9
         var vLeft = 0f
-        var vTop = 0f
+        var vTop = dpToPx(48f)
         var vW = fullW.toFloat().coerceAtLeast(1f)
         var vH = vW * 9f / 16f
         if (rect != null) {
@@ -610,7 +589,11 @@ class PlayerSheetController(
     fun release() {
         clearPendingLayoutListener()
         clearPipViewportListener()
-        binding.playerPanel.animate().cancel()
-        binding.playerWebView.animate().cancel()
+        binding.playerPanel.canDragDown = null
+        binding.playerPanel.videoZoneBottomProvider = null
+        binding.playerPanel.onDragOffset = null
+        binding.playerPanel.onDragFinished = null
+        binding.playerPanel.animate().withEndAction(null).cancel()
+        binding.playerWebView.animate().withEndAction(null).cancel()
     }
 }

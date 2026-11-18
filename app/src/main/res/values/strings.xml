@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LiteTube</string>
-    <string name="desc_minimize_player">Thu nhỏ trình phát</string>
     <string name="desc_play_pause">Phát hoặc tạm dừng</string>
     <string name="desc_close_player">Đóng trình phát</string>
     <string name="settings_title">Cài đặt LiteTube</string>

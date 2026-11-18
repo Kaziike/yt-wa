@@ -257,5 +257,26 @@
                 }
             } catch (err) {}
         }, true);
+    } else {
+        // 4. Trên Player WebView: bấm vào Logo YouTube ở thanh topbar sẽ thu nhỏ trình phát thành MiniPlayer
+        document.addEventListener('click', function(e) {
+            try {
+                var el = e.target;
+                if (!el || !el.closest) return;
+                var inTopbar = el.closest('ytm-mobile-topbar-renderer, #header-bar, header.mobile-topbar-header');
+                if (!inTopbar) return;
+                var logoHit = el.closest(
+                    'ytm-home-logo, .mobile-topbar-header-endpoint, .logo-in-player-endpoint, #home-icon, .mobile-topbar-logo, a[href="/"]'
+                );
+                if (logoHit) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    if (window.AndroidBridge && typeof window.AndroidBridge.minimizePlayer === 'function') {
+                        window.AndroidBridge.minimizePlayer();
+                    }
+                }
+            } catch (err) {}
+        }, true);
     }
 })();
