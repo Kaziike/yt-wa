@@ -1,0 +1,57 @@
+/* ==============================================================
+   LITETUBE BASE UX POLISH (ÁP DỤNG CHO CẢ BROWSE & PLAYER WEBVIEW)
+   1. Tắt hoàn toàn khung tô sáng & nháy lại khi chạm kéo cuộn trang chủ.
+   2. Ẩn ngay từ frame 0 nút nổi "Tap to unmute / Nhấn để bật tiếng"
+      trong khi script tự động bật tiếng ngầm bên dưới.
+   ============================================================== */
+
+/* 1. Xóa highlight mặc định của WebView khi chạm / nhấc tay */
+html,
+body,
+a,
+button,
+div,
+span,
+[role="button"],
+[role="link"],
+[tabindex] {
+    -webkit-tap-highlight-color: transparent !important;
+}
+
+/* Tắt lớp phủ tô sáng & nháy viền (yt-touch-feedback-shape) trên các thẻ video khi lướt cuộn */
+ytm-video-with-context-renderer yt-touch-feedback-shape,
+ytm-video-with-context-renderer .yt-spec-touch-feedback-shape,
+ytm-rich-item-renderer yt-touch-feedback-shape,
+ytm-rich-item-renderer .yt-spec-touch-feedback-shape,
+ytm-compact-video-renderer yt-touch-feedback-shape,
+ytm-compact-video-renderer .yt-spec-touch-feedback-shape,
+ytm-media-item yt-touch-feedback-shape,
+ytm-media-item .yt-spec-touch-feedback-shape,
+.media-item-thumbnail-container yt-touch-feedback-shape,
+.video-thumbnail-container-large yt-touch-feedback-shape,
+a[href*="/watch"] yt-touch-feedback-shape,
+a[href*="/watch"] .yt-spec-touch-feedback-shape {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* 2. Ẩn tức thì nút nổi "Ấn vào để bật tiếng / Tap to unmute" ngay trước khi video phát
+      (Không ảnh hưởng nút loa .ytp-mute-button trong thanh điều khiển trình phát) */
+html:not([data-litetube-user-muted]) .ytp-unmute:not(.ytp-mute-button),
+html:not([data-litetube-user-muted]) button.ytp-unmute:not(.ytp-mute-button),
+html:not([data-litetube-user-muted]) .ytm-unmute-button:not(.ytp-mute-button),
+html:not([data-litetube-user-muted]) ytm-sound-off-button-renderer,
+html:not([data-litetube-user-muted]) .ytp-unmute-inner,
+html:not([data-litetube-user-muted]) button[aria-label*="Tap to unmute" i]:not(.ytp-mute-button),
+html:not([data-litetube-user-muted]) button[aria-label*="Nhấn để bật tiếng" i]:not(.ytp-mute-button),
+html:not([data-litetube-user-muted]) button[aria-label*="Ấn để bật tiếng" i]:not(.ytp-mute-button),
+html:not([data-litetube-user-muted]) button[aria-label*="Bật tiếng" i]:not(.ytp-mute-button) {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+}

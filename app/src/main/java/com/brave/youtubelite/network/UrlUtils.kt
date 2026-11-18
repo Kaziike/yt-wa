@@ -23,8 +23,14 @@ object UrlUtils {
         "google.com",
         "gstatic.com",
         "ggpht.com",
-        "ytimg.com"
+        "ytimg.com",
+        "recaptcha.net",
+        "googleusercontent.com",
+        "gvt1.com"
     )
+
+    private val GOOGLE_REGIONAL_DOMAIN_REGEX =
+        Regex("^(?:[a-z0-9-]+\\.)*google\\.(?:com|[a-z]{2}|com\\.[a-z]{2}|co\\.[a-z]{2})$")
 
     fun parseHttpUrl(rawUrl: String?): ParsedHttpUrl? {
         if (rawUrl.isNullOrBlank()) return null
@@ -83,9 +89,10 @@ object UrlUtils {
 
     fun isAllowedInAppHost(host: String): Boolean {
         val h = host.lowercase(Locale.ROOT)
-        return ALLOWED_IN_APP_DOMAINS.any { domain ->
-            h == domain || h.endsWith(".$domain")
+        if (ALLOWED_IN_APP_DOMAINS.any { domain -> h == domain || h.endsWith(".$domain") }) {
+            return true
         }
+        return GOOGLE_REGIONAL_DOMAIN_REGEX.matches(h)
     }
 
     fun getQueryParameter(query: String?, key: String): String? {

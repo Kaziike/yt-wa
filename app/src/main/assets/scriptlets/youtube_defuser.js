@@ -295,7 +295,14 @@
             var muteBtn = t.closest('.ytp-mute-button');
             if (muteBtn) {
                 var v = core.getMainVideo();
-                if (v) userMutedVideo = !v.muted;
+                if (v) {
+                    userMutedVideo = !v.muted;
+                    if (userMutedVideo) {
+                        document.documentElement.setAttribute('data-litetube-user-muted', '1');
+                    } else {
+                        document.documentElement.removeAttribute('data-litetube-user-muted');
+                    }
+                }
             }
 
             if (t.closest('#movie_player, .html5-video-player, #player-container-id, #player, .player-container, ytm-player, .player-controls-content, .player-controls-background-container')) {
@@ -308,7 +315,7 @@
     });
 
     // ==============================================================
-    // 4. AUTO-UNMUTE THEO SỰ KIỆN (KHÔNG DÙNG SETINTERVAL 250MS)
+    // 4. AUTO-UNMUTE TỨC THÌ TỪ LÚC NẠP LUỒNG (KHÔNG CHỜ NÚT HIỆN LÊN MÀN HÌNH)
     // ==============================================================
     function tryAutoUnmute() {
         try {
@@ -323,27 +330,23 @@
                 lastAutoUnmuteKey = key;
                 autoUnmuteWindowUntil = Date.now() + 6000;
                 userMutedVideo = false;
+                document.documentElement.removeAttribute('data-litetube-user-muted');
             }
 
             if (userMutedVideo) return;
 
-            var candidates = document.querySelectorAll(
-                '.ytp-unmute, button.ytp-unmute, .ytm-unmute-button, button[class*="unmute" i], button[aria-label*="Tap to unmute" i], button[aria-label*="Bật tiếng" i]'
+            // Tìm nút unmute kể cả khi đã bị base_ux.css ẩn (opacity: 0) để kích hoạt trạng thái âm thanh nội bộ của YouTube
+            var unmuteBtn = document.querySelector(
+                '.ytp-unmute:not(.ytp-mute-button), button.ytp-unmute:not(.ytp-mute-button), ' +
+                '.ytm-unmute-button:not(.ytp-mute-button), button[aria-label*="Tap to unmute" i]:not(.ytp-mute-button), ' +
+                'button[aria-label*="Nhấn để bật tiếng" i]:not(.ytp-mute-button), button[aria-label*="Bật tiếng" i]:not(.ytp-mute-button)'
             );
-            var visibleUnmuteBtn = null;
-            for (var i = 0; i < candidates.length; i++) {
-                var btn = candidates[i];
-                if (!btn.classList.contains('ytp-mute-button') && isElementVisible(btn)) {
-                    visibleUnmuteBtn = btn;
-                    break;
-                }
-            }
 
-            if (!visibleUnmuteBtn && Date.now() >= autoUnmuteWindowUntil) return;
+            if (!unmuteBtn && Date.now() >= autoUnmuteWindowUntil) return;
 
-            if (visibleUnmuteBtn) {
-                try { visibleUnmuteBtn.click(); } catch (eClick) {}
-            }
+            if (video.muted) video.muted = false;
+            if (video.volume === 0) video.volume = 1.0;
+
             var player = core.getPlayer();
             if (player) {
                 try {
@@ -355,14 +358,24 @@
                     }
                 } catch (ePl) {}
             }
-            if (video.muted) video.muted = false;
-            if (video.volume === 0) video.volume = 1.0;
+
+            if (unmuteBtn && (video.muted || Date.now() < autoUnmuteWindowUntil)) {
+                try { unmuteBtn.click(); } catch (eClick) {}
+                if (video.muted) video.muted = false;
+            }
         } catch (e) {}
     }
 
     // ==============================================================
     // 5. ĐỒNG BỘ MEDIA STATE THEO SỰ KIỆN THỰC TẾ (0% CPU KHI IDLE)
     // ==============================================================
+    ['loadstart', 'loadeddata', 'canplay'].forEach(function(eventType) {
+        document.addEventListener(eventType, function(e) {
+            if (e.target && e.target.tagName === 'VIDEO') {
+                tryAutoUnmute();
+            }
+        }, true);
+    });
     ['play', 'playing'].forEach(function(eventType) {
         document.addEventListener(eventType, function(e) {
             if (e.target && e.target.tagName === 'VIDEO') {

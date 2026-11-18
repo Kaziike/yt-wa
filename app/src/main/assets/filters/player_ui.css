@@ -1,7 +1,7 @@
 /* ==============================================================
    GIAO DIỆN TRÌNH PHÁT VIDEO (CHỈ TIÊM TRÊN PLAYER WEBVIEW)
-   Ẩn thanh header YouTube Mobile phía trên video khi xem thường
-   (tự động nhường quyền cho CSS cô lập khi có [data-brave-pip-mode]).
+   Ẩn triệt để thanh header YouTube Mobile (kể cả khung skeleton ban đầu
+   trước khi video phát) và dải tiêu đề trên của trình phát nhúng.
    ============================================================== */
 
 html:not([data-brave-pip-mode]) ytm-mobile-topbar-renderer,
@@ -9,9 +9,16 @@ html:not([data-brave-pip-mode]) ytm-header-bar,
 html:not([data-brave-pip-mode]) #header-bar,
 html:not([data-brave-pip-mode]) header.mobile-topbar-header,
 html:not([data-brave-pip-mode]) .mobile-topbar-header,
-html:not([data-brave-pip-mode]) .mobile-topbar-header-content {
+html:not([data-brave-pip-mode]) .mobile-topbar-header-background,
+html:not([data-brave-pip-mode]) .mobile-topbar-header-content,
+html:not([data-brave-pip-mode]) .watch-skeleton #header-bar,
+html:not([data-brave-pip-mode]) .skeleton-light-border-bottom,
+html:not([data-brave-pip-mode]) .ytp-chrome-top,
+html:not([data-brave-pip-mode]) .ytp-title,
+html:not([data-brave-pip-mode]) .ytp-chrome-top-buttons {
     display: none !important;
     visibility: hidden !important;
+    opacity: 0 !important;
     height: 0 !important;
     min-height: 0 !important;
     max-height: 0 !important;
@@ -22,17 +29,21 @@ html:not([data-brave-pip-mode]) .mobile-topbar-header-content {
     pointer-events: none !important;
 }
 
+html:not([data-brave-pip-mode]) body,
 html:not([data-brave-pip-mode]) #app,
 html:not([data-brave-pip-mode]) ytm-app,
 html:not([data-brave-pip-mode]) ytm-watch,
 html:not([data-brave-pip-mode]) .page-container,
-html:not([data-brave-pip-mode]) ytm-page-manager {
+html:not([data-brave-pip-mode]) ytm-page-manager,
+html:not([data-brave-pip-mode]) .watch-below-the-player {
     padding-top: 0 !important;
     margin-top: 0 !important;
 }
 
 html:not([data-brave-pip-mode]) #player-container-id,
 html:not([data-brave-pip-mode]) .player-container.sticky-player,
-html:not([data-brave-pip-mode]) .player-size {
+html:not([data-brave-pip-mode]) .player-size,
+html:not([data-brave-pip-mode]) #player-cinematics-container {
     top: 0 !important;
+    margin-top: 0 !important;
 }

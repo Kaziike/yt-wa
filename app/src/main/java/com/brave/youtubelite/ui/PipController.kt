@@ -198,12 +198,29 @@ class PipController(
         }
     }
 
+    private fun ensurePreparedForPip() {
+        isInPipLayout = true
+        playerSheet.prepareForPip(
+            onPipViewportChanged = {
+                if (isInPipMode()) {
+                    playback.runPipCommand("syncViewport()")
+                }
+            }
+        )
+    }
+
+    fun onPipConfigurationChanged() {
+        if (isInPipMode()) {
+            ensurePreparedForPip()
+            playback.runPipCommand("syncViewport()")
+        }
+    }
+
     fun onUserLeaveHint() {
         val autoPip = AppSettings.isAutoPipEnabled(activity)
         if ((playback.state.isPlaying || fullscreenController.isFullscreen) && autoPip) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !activity.isInPictureInPictureMode) {
-                playerSheet.prepareForPip()
-                isInPipLayout = true
+                ensurePreparedForPip()
                 try {
                     buildParams()?.let { activity.enterPictureInPictureMode(it) }
                 } catch (e: Exception) {
@@ -219,10 +236,7 @@ class PipController(
         if (inPip) {
             wasInPipMode = true
             hidingPipToAudioAtMs = 0L
-            if (!isInPipLayout) {
-                playerSheet.prepareForPip()
-                isInPipLayout = true
-            }
+            ensurePreparedForPip()
             playback.onPipEntered()
             updateParams()
         } else {

@@ -60,4 +60,20 @@ class UrlAndCacheValidationTest {
         val k2 = WebResourceCacheManager.getCacheKey("https://s.ytimg.com/yts/jsbin/s/mobile/app.js?v=2")
         assertEquals(k1, k2)
     }
+
+    @Test
+    fun allowsGoogleSignInAndRecaptchaDomainsAndSkipsStaticCacheInterception() {
+        assertTrue(UrlUtils.isAllowedInAppHost("accounts.google.com"))
+        assertTrue(UrlUtils.isAllowedInAppHost("accounts.google.com.vn"))
+        assertTrue(UrlUtils.isAllowedInAppHost("www.google.com.vn"))
+        assertTrue(UrlUtils.isAllowedInAppHost("www.recaptcha.net"))
+        assertFalse(UrlUtils.isAllowedInAppHost("evil-google.com"))
+
+        // Tuyệt đối không cache script xác minh reCAPTCHA để giữ nguyên CORS/SRI gốc của trình duyệt
+        assertFalse(
+            WebResourceCacheManager.isCacheableStaticUrl(
+                "https://www.gstatic.com/recaptcha/releases/v1/recaptcha__vi.js"
+            )
+        )
+    }
 }

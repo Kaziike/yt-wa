@@ -2,8 +2,8 @@
  * LITETUBE PIP & PLAYBACK CONTROLLER
  * - Cô lập tuyệt đối thẻ <video> khi và chỉ khi Native Android kích hoạt PiP (không tự đoán theo
  *   kích thước màn hình, tránh lỗi đen hình khi chia đôi màn hình Split-Screen).
- * - Dùng MutationObserver chỉ trong lúc PiP đang bật (thay vì setInterval 300ms).
- * - Cung cấp bộ điều khiển thống nhất cho PiP, MiniPlayer và MediaService.
+ * - Dùng width:100% / height:100% neo trực tiếp vào khung fixed inset:0 kèm reset scroll (0,0)
+ *   và lắng nghe sự kiện resize để khớp 100% khung hình ngay cả khi chuyển trực tiếp từ MiniPlayer sang PiP.
  */
 (function() {
     'use strict';
@@ -20,7 +20,10 @@
     var CSS = [
         'html[' + MODE_ATTR + '], html[' + MODE_ATTR + '] body {',
         '  background:#000!important; margin:0!important; padding:0!important;',
-        '  width:100vw!important; height:100vh!important; overflow:hidden!important;',
+        '  width:100%!important; height:100%!important;',
+        '  min-width:0!important; min-height:0!important;',
+        '  max-width:100%!important; max-height:100%!important;',
+        '  overflow:hidden!important; position:fixed!important; inset:0!important;',
         '}',
         'html[' + MODE_ATTR + '] body *:not([' + ROLE_ATTR + ']) {',
         '  display:none!important; visibility:hidden!important;',
@@ -29,8 +32,9 @@
         'html[' + MODE_ATTR + '] [' + ROLE_ATTR + '="ancestor"] {',
         '  display:block!important; visibility:visible!important; position:fixed!important;',
         '  top:0!important; left:0!important; right:0!important; bottom:0!important;',
-        '  width:100vw!important; height:100vh!important;',
-        '  max-width:100vw!important; max-height:100vh!important;',
+        '  width:100%!important; height:100%!important;',
+        '  min-width:0!important; min-height:0!important;',
+        '  max-width:100%!important; max-height:100%!important;',
         '  margin:0!important; padding:0!important; border:0!important;',
         '  background:transparent!important; background-color:transparent!important;',
         '  transform:none!important; -webkit-transform:none!important;',
@@ -47,9 +51,9 @@
         'html[' + MODE_ATTR + '] video[' + ROLE_ATTR + '="video"] {',
         '  visibility:visible!important; display:block!important; position:fixed!important;',
         '  top:0!important; left:0!important; right:0!important; bottom:0!important;',
-        '  width:100vw!important; height:100vh!important;',
-        '  min-width:100vw!important; min-height:100vh!important;',
-        '  max-width:100vw!important; max-height:100vh!important;',
+        '  width:100%!important; height:100%!important;',
+        '  min-width:100%!important; min-height:100%!important;',
+        '  max-width:100%!important; max-height:100%!important;',
         '  margin:0!important; padding:0!important; border:0!important;',
         '  transform:none!important; -webkit-transform:none!important;',
         '  object-fit:contain!important; background:#000!important; opacity:1!important;',
@@ -61,6 +65,8 @@
     var currentVideo = null;
     var domObserver = null;
     var pendingTimers = [];
+    var savedScrollX = 0;
+    var savedScrollY = 0;
 
     function clearPendingTimers() {
         while (pendingTimers.length > 0) {
@@ -75,7 +81,7 @@
     }
 
     function setAttr(el, name, value) {
-        if (el && el.getAttribute(name) !== value) {
+        if (el && typeof el.getAttribute === 'function' && el.getAttribute(name) !== value) {
             el.setAttribute(name, value);
         }
     }
@@ -107,8 +113,19 @@
         }
     }
 
+    function resetScrollToTop() {
+        try {
+            if (window.scrollX !== 0 || window.scrollY !== 0) {
+                window.scrollTo(0, 0);
+            }
+            if (document.documentElement) document.documentElement.scrollTop = 0;
+            if (document.body) document.body.scrollTop = 0;
+        } catch (e) {}
+    }
+
     function applyIsolation() {
         if (!active) return;
+        resetScrollToTop();
         setAttr(document.documentElement, MODE_ATTR, 'on');
         ensureStyle();
 
@@ -124,6 +141,14 @@
         }
         core.syncMediaState(false);
     }
+
+    // Khi WebView đổi kích thước từ khung khóa MiniPlayer (full màn hình) về khung nhỏ của PiP,
+    // sự kiện resize sẽ cập nhật lại ngay bố cục cô lập để video luôn lấp đầy 100% cửa sổ PiP.
+    window.addEventListener('resize', function() {
+        if (active) {
+            applyIsolation();
+        }
+    }, true);
 
     function startObserver() {
         if (domObserver || !window.MutationObserver) return;
@@ -194,6 +219,10 @@
 
     function enter() {
         clearPendingTimers();
+        if (!active) {
+            savedScrollX = window.scrollX || 0;
+            savedScrollY = window.scrollY || 0;
+        }
         active = true;
         core.setMode('PIP');
         core.state.protectPlayUntil = Date.now() + 3000;
@@ -206,12 +235,26 @@
                 core.nativePlay(v);
                 schedule(function() {
                     if (!active || core.state.userPaused) return;
+                    applyIsolation();
                     var target = core.getMainVideo() || v;
                     if (target && target.paused) core.nativePlay(target);
-                }, 220);
+                }, 180);
             }
         }
         return currentVideo ? 'pip:on' : 'pip:on(no-video)';
+    }
+
+    function syncViewport() {
+        if (!active) return 'pip:inactive';
+        applyIsolation();
+        if (!core.state.userPaused) {
+            var v = core.getMainVideo();
+            if (v && v.paused) {
+                core.state.protectPlayUntil = Math.max(core.state.protectPlayUntil, Date.now() + 1500);
+                core.nativePlay(v);
+            }
+        }
+        return 'pip:synced';
     }
 
     function exit() {
@@ -230,6 +273,14 @@
             schedule(resyncPlayerState, 120);
             core.syncMediaState(true);
             return 'pip:off(idle)';
+        }
+
+        if (savedScrollX !== 0 || savedScrollY !== 0) {
+            var sx = savedScrollX;
+            var sy = savedScrollY;
+            savedScrollX = 0;
+            savedScrollY = 0;
+            try { window.scrollTo(sx, sy); } catch (eScroll) {}
         }
 
         var exitAt = Date.now();
@@ -467,6 +518,7 @@
     window.__bravePip = {
         enter: enter,
         exit: exit,
+        syncViewport: syncViewport,
         play: play,
         pause: pause,
         toggle: toggle,

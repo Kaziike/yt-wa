@@ -157,7 +157,10 @@ object WebResourceCacheManager {
         if (lowerPath.contains("/youtubei/v1/") ||
             lowerPath.contains("/api/") ||
             lowerPath.contains("/ptracking") ||
-            lowerPath.contains("/generate_204")
+            lowerPath.contains("/generate_204") ||
+            lowerPath.contains("/recaptcha/") ||
+            lowerPath.contains("/accounts/") ||
+            lowerPath.contains("/boq-identity/")
         ) {
             return false
         }
@@ -350,13 +353,13 @@ object WebResourceCacheManager {
     ): WebResourceResponse {
         val allowedOrigin = if (!requestOrigin.isNullOrBlank()) {
             val parsedOrigin = UrlUtils.parseHttpUrl(requestOrigin)
-            if (parsedOrigin != null && UrlUtils.isYouTubeHost(parsedOrigin.host)) {
+            if (parsedOrigin != null && UrlUtils.isAllowedInAppHost(parsedOrigin.host)) {
                 "${parsedOrigin.scheme}://${parsedOrigin.host}"
             } else {
                 "https://m.youtube.com"
             }
         } else {
-            "https://m.youtube.com"
+            "*"
         }
 
         val responseHeaders = mapOf(

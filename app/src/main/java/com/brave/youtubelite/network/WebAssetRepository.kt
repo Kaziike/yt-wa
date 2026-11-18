@@ -6,7 +6,7 @@ import android.util.Log
 
 /**
  * Kho lưu trữ tập trung các file Scriptlet & CSS trong bộ nhớ.
- * Chỉ đọc file từ đĩa đúng 1 lần duy nhất cho cả ứng dụng (tránh nhân 2-3 bản sao trên Heap).
+ * Chỉ đọc file từ đĩa đúng 1 lần duy nhất cho cả ứng dụng.
  */
 object WebAssetRepository {
     private const val TAG = "WebAssetRepository"
@@ -21,6 +21,8 @@ object WebAssetRepository {
     var youtubeDefuserJs: String = ""
         private set
     var browseInterceptorJs: String = ""
+        private set
+    var injectBaseUxCssJs: String = ""
         private set
     var injectCosmeticCssJs: String = ""
         private set
@@ -39,6 +41,11 @@ object WebAssetRepository {
             pipControllerJs = readAssetText(app, "scriptlets/pip_controller.js")
             youtubeDefuserJs = readAssetText(app, "scriptlets/youtube_defuser.js")
             browseInterceptorJs = readAssetText(app, "scriptlets/browse_interceptor.js")
+
+            val baseUxCss = readAssetText(app, "filters/base_ux.css")
+            if (baseUxCss.isNotEmpty()) {
+                injectBaseUxCssJs = buildTrustedCssInjector("__brave_base_ux_style", baseUxCss, conditionalAdblock = false)
+            }
 
             val cosmeticCss = readAssetText(app, "filters/cosmetic_rules.css")
             if (cosmeticCss.isNotEmpty()) {
@@ -64,7 +71,9 @@ object WebAssetRepository {
     }
 
     /**
-     * Đóng gói CSS qua Base64 + TextDecoder gán vào textContent để tuân thủ TrustedHTML CSP của YouTube.
+     * Đóng gói CSS qua Base64 + TextDecoder gán vào textContent (tuân thủ TrustedHTML CSP).
+     * Dùng MutationObserver trên document tại DOCUMENT_START để gắn <style> ngay micro-giây thẻ <html>
+     * vừa khởi tạo (0ms FOUC, không bị nháy thanh header hoặc nút unmute trước khi video phát).
      */
     private fun buildTrustedCssInjector(
         styleId: String,
@@ -73,12 +82,21 @@ object WebAssetRepository {
     ): String {
         val encoded = Base64.encodeToString(rawCss.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
         val guard = if (conditionalAdblock) {
-            "if(window.__liteTube && window.__liteTube.state.settings.adblock === false) return;"
+            "if(window.__liteTube && window.__liteTube.state.settings.adblock === false) return true;"
         } else {
             ""
         }
         return """
             (function() {
+                var decodedCss = null;
+                function getCssText() {
+                    if (decodedCss !== null) return decodedCss;
+                    var bin = window.atob('$encoded');
+                    var bytes = new Uint8Array(bin.length);
+                    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                    decodedCss = (window.TextDecoder ? new TextDecoder('utf-8').decode(bytes) : bin);
+                    return decodedCss;
+                }
                 function mountStyle() {
                     try {
                         $guard
@@ -89,10 +107,7 @@ object WebAssetRepository {
                             style = document.createElement('style');
                             style.id = '$styleId';
                             style.type = 'text/css';
-                            var bin = window.atob('$encoded');
-                            var bytes = new Uint8Array(bin.length);
-                            for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                            style.textContent = (window.TextDecoder ? new TextDecoder('utf-8').decode(bytes) : bin);
+                            style.textContent = getCssText();
                         }
                         if (style.parentNode !== target) {
                             target.appendChild(style);
@@ -102,8 +117,13 @@ object WebAssetRepository {
                         return false;
                     }
                 }
-                if (!mountStyle() && document.readyState === 'loading') {
-                    document.addEventListener('DOMContentLoaded', mountStyle, { once: true });
+                if (!mountStyle() && window.MutationObserver) {
+                    var obs = new MutationObserver(function() {
+                        if (mountStyle()) {
+                            obs.disconnect();
+                        }
+                    });
+                    obs.observe(document, { childList: true });
                 }
             })();
         """.trimIndent()

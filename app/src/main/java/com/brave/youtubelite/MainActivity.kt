@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.webkit.ConsoleMessage
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -149,6 +150,7 @@ class MainActivity : AppCompatActivity(), WebBridge.Listener {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
+            javaScriptCanOpenWindowsAutomatically = true
             allowFileAccess = false
             allowContentAccess = false
             cacheMode = WebSettings.LOAD_DEFAULT
@@ -156,6 +158,14 @@ class MainActivity : AppCompatActivity(), WebBridge.Listener {
             offscreenPreRaster = false
             userAgentString = userAgentString.replace("; wv", "")
         }
+        // Bật Cookie & Third-Party Cookies để khung iframe đăng nhập Google / xác minh reCAPTCHA hiển thị đầy đủ
+        try {
+            val cookieManager = CookieManager.getInstance()
+            cookieManager.setAcceptCookie(true)
+            cookieManager.setAcceptThirdPartyCookies(view, true)
+        } catch (_: Exception) {}
+
+        view.setBackgroundColor(Color.BLACK)
         view.setLayerType(View.LAYER_TYPE_NONE, null)
         view.isFocusable = true
         view.isFocusableInTouchMode = true
@@ -366,7 +376,11 @@ class MainActivity : AppCompatActivity(), WebBridge.Listener {
     // ==============================================================
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        playerSheet.onConfigurationChanged()
+        if (pipController.isInPipMode()) {
+            pipController.onPipConfigurationChanged()
+        } else {
+            playerSheet.onConfigurationChanged()
+        }
     }
 
     override fun onUserLeaveHint() {
@@ -396,6 +410,9 @@ class MainActivity : AppCompatActivity(), WebBridge.Listener {
 
     override fun onStop() {
         super.onStop()
+        try {
+            CookieManager.getInstance().flush()
+        } catch (_: Exception) {}
         pipController.onActivityStopped()
     }
 

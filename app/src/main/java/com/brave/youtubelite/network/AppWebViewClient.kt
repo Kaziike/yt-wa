@@ -103,6 +103,15 @@ class AppWebViewClient(
                     )
                 )
             }
+            if (WebAssetRepository.injectBaseUxCssJs.isNotEmpty()) {
+                scriptHandlers.add(
+                    WebViewCompat.addDocumentStartJavaScript(
+                        webView,
+                        WebAssetRepository.injectBaseUxCssJs,
+                        YOUTUBE_SCRIPT_ORIGINS
+                    )
+                )
+            }
             if (WebAssetRepository.injectCosmeticCssJs.isNotEmpty()) {
                 scriptHandlers.add(
                     WebViewCompat.addDocumentStartJavaScript(
@@ -148,7 +157,10 @@ class AppWebViewClient(
     }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-        val rawUrl = request?.url?.toString() ?: return false
+        if (request == null) return false
+        // Cho phép toàn bộ iframe con (như widget xác minh reCAPTCHA / đăng nhập Google) tải tự nhiên
+        if (!request.isForMainFrame) return false
+        val rawUrl = request.url?.toString() ?: return false
         return handleNavigation(rawUrl)
     }
 
@@ -209,6 +221,14 @@ class AppWebViewClient(
     ): WebResourceResponse? {
         val url = request?.url?.toString() ?: return null
 
+        // Không can thiệp bất kỳ tài nguyên xác thực đăng nhập hoặc reCAPTCHA của Google
+        if (url.contains("/recaptcha/", ignoreCase = true) ||
+            url.contains("recaptcha.net", ignoreCase = true) ||
+            url.contains("accounts.google.", ignoreCase = true)
+        ) {
+            return super.shouldInterceptRequest(view, request)
+        }
+
         if (AdBlockEngine.isBlocked(url)) {
             return WebResourceResponse(
                 "text/plain",
@@ -260,6 +280,10 @@ class AppWebViewClient(
             "if(window.__liteTube)window.__liteTube.applySettings($settingsJson);",
             null
         )
+
+        if (WebAssetRepository.injectBaseUxCssJs.isNotEmpty()) {
+            webView.evaluateJavascript(WebAssetRepository.injectBaseUxCssJs, null)
+        }
 
         if (!isBrowseMode && WebAssetRepository.injectPlayerUiCssJs.isNotEmpty()) {
             webView.evaluateJavascript(WebAssetRepository.injectPlayerUiCssJs, null)
