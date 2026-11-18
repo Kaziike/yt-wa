@@ -1,4 +1,4 @@
-package com.brave.youtubelite.playback
+package com.kaz.litetube.playback
 
 import android.webkit.JavascriptInterface
 

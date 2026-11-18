@@ -1,4 +1,4 @@
-package com.brave.youtubelite.network
+package com.kaz.litetube.network
 
 import java.net.URLDecoder
 import java.util.Locale

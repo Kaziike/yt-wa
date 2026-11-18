@@ -1,4 +1,4 @@
-package com.brave.youtubelite.ui
+package com.kaz.litetube.ui
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
@@ -7,7 +7,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.widget.FrameLayout
-import com.brave.youtubelite.databinding.ActivityMainBinding
+import com.kaz.litetube.databinding.ActivityMainBinding
 
 /**
  * Quản lý chế độ xem video toàn màn hình (HTML5 CustomView) cho cả Player WebView và Browse WebView:

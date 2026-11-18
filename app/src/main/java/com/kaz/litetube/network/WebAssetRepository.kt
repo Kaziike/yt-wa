@@ -1,4 +1,4 @@
-package com.brave.youtubelite.network
+package com.kaz.litetube.network
 
 import android.content.Context
 import android.util.Base64

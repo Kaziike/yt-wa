@@ -14,3 +14,10 @@ adblock-rust/
 
 
 error.txt
+
+# Android Release Signing Secrets (NEVER commit)
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.b64

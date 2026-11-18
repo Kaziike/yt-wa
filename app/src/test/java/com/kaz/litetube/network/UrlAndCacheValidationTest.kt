@@ -1,4 +1,4 @@
-package com.brave.youtubelite.network
+package com.kaz.litetube.network
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,7 +28,7 @@ class UrlAndCacheValidationTest {
 
         // Chặn tuyệt đối các scheme độc hại hoặc domain giả mạo
         assertNull(UrlUtils.normalizeWatchUrl("javascript:alert(1)"))
-        assertNull(UrlUtils.normalizeWatchUrl("file:///data/data/com.brave.youtubelite/prefs.xml"))
+        assertNull(UrlUtils.normalizeWatchUrl("file:///data/data/com.kaz.litetube/prefs.xml"))
         assertNull(UrlUtils.normalizeWatchUrl("https://evil-phishing.com/watch?v=abc123XYZ"))
     }
 

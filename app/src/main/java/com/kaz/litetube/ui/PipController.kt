@@ -1,4 +1,4 @@
-package com.brave.youtubelite.ui
+package com.kaz.litetube.ui
 
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
@@ -15,9 +15,9 @@ import android.util.Rational
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
-import com.brave.youtubelite.R
-import com.brave.youtubelite.playback.PlaybackCoordinator
-import com.brave.youtubelite.settings.AppSettings
+import com.kaz.litetube.R
+import com.kaz.litetube.playback.PlaybackCoordinator
+import com.kaz.litetube.settings.AppSettings
 import java.util.UUID
 
 /**
@@ -35,10 +35,10 @@ class PipController(
 
     companion object {
         private const val TAG = "PipController"
-        private const val ACTION_PIP_HEADPHONES = "com.brave.youtubelite.PIP_HEADPHONES"
-        private const val ACTION_PIP_PLAY = "com.brave.youtubelite.PIP_PLAY"
-        private const val ACTION_PIP_PAUSE = "com.brave.youtubelite.PIP_PAUSE"
-        private const val ACTION_PIP_NEXT = "com.brave.youtubelite.PIP_NEXT"
+        private const val ACTION_PIP_HEADPHONES = "com.kaz.litetube.PIP_HEADPHONES"
+        private const val ACTION_PIP_PLAY = "com.kaz.litetube.PIP_PLAY"
+        private const val ACTION_PIP_PAUSE = "com.kaz.litetube.PIP_PAUSE"
+        private const val ACTION_PIP_NEXT = "com.kaz.litetube.PIP_NEXT"
         private const val EXTRA_PIP_TOKEN = "EXTRA_PIP_TOKEN"
 
         private const val REQ_PLAY = 1001

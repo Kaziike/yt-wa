@@ -34,18 +34,35 @@ Tài liệu này cung cấp hướng dẫn từng bước để thiết lập m�
    app/build/outputs/apk/debug/app-debug.apk
    ```
 
-### B. Biên dịch bản Release
-Bản Release được cấu hình bật R8 tối ưu hóa và co gọn tài nguyên (`isMinifyEnabled = true`, `isShrinkResources = true`):
-```powershell
-.\gradlew.bat assembleRelease
-```
-File APK sẽ xuất hiện tại `app/build/outputs/apk/release/app-release.apk` (mặc định cấu hình ký bằng debug keystore theo `app/build.gradle.kts` dòng 28).
+### B. Ký & Biên dịch bản Release (`com.kaz.litetube`)
+Bản Release được cấu hình bật R8 tối ưu hóa và co gọn tài nguyên (`isMinifyEnabled = true`, `isShrinkResources = true`).
+
+1. **Tạo Release Keystore (chỉ làm 1 lần duy nhất):**
+   Chạy script tương tác có sẵn trong dự án (yêu cầu `keytool` và `python3`):
+   ```bash
+   chmod +x scripts/generate-keystore.sh
+   ./scripts/generate-keystore.sh
+   ```
+   Script sẽ tạo file `litetube-release.jks`, `keystore.properties` (cho build local) và `litetube-release.jks.b64` (để nạp lên GitHub Secrets). Tất cả đều được `.gitignore` chặn tuyệt đối để không bao giờ bị đẩy lên Git. Bạn cũng có thể tự sao chép `keystore.properties.example` thành `keystore.properties` và điền thông tin keystore có sẵn.
+
+2. **Đóng gói Release APK tại máy local:**
+   ```powershell
+   # Trên Windows:
+   .\gradlew.bat assembleRelease
+
+   # Trên Linux / macOS:
+   ./gradlew assembleRelease
+   ```
+   File APK đầu ra nằm tại `app/build/outputs/apk/release/app-release.apk`. Nếu chưa cấu hình `keystore.properties` hoặc biến môi trường (`KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`), Gradle sẽ tự fallback sang ký tạm bằng debug keystore để build nháp không bị lỗi.
 
 ### C. Đóng gói tự động bằng GitHub Actions (Không cần cài SDK)
-1. Đẩy mã nguồn lên repository GitHub của bạn (nhánh `main`).
-2. Vào tab **Actions** $\rightarrow$ chọn workflow **Build LiteTube APK**.
-3. Bạn có thể bấm nút **Run workflow** thủ công (`workflow_dispatch`).
-4. Khi tiến trình hoàn thành (khoảng 1.5 - 2 phút), tải file APK trong mục **Artifacts** (`LiteTube-Debug-APK`).
+1. Trong repository GitHub, vào **Settings → Secrets and variables → Actions → New repository secret** và khai báo 4 secret từ bước tạo keystore:
+   - `KEYSTORE_BASE64` (nội dung file `.jks.b64`)
+   - `KEYSTORE_PASSWORD`
+   - `KEY_ALIAS` (mặc định `litetube`)
+   - `KEY_PASSWORD`
+2. Đẩy mã nguồn lên repository GitHub của bạn (nhánh `main`, `master` hoặc `test`), hoặc vào tab **Actions** → chọn workflow **Build LiteTube APK** → bấm **Run workflow** (`workflow_dispatch`).
+3. Khi tiến trình hoàn thành, tải file APK trong mục **Artifacts** (`LiteTube-Release-APK`, lưu trữ 30 ngày). Nhờ ký bằng cùng một Release Keystore cố định, các phiên bản sau có thể cài đè trực tiếp mà không mất dữ liệu hay phiên đăng nhập.
 
 ---
 

@@ -33,12 +33,59 @@ jobs:
       - name: Cấp quyền thực thi cho gradlew
         run: chmod +x gradlew || true
 
-      - name: Chạy Unit Test và đóng gói Debug APK
-        run: ./gradlew testDebugUnitTest assembleDebug --stacktrace
+      - name: Khôi phục Release Keystore từ GitHub Secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > "${RUNNER_TEMP}/release-keystore.jks"
+            echo "KEYSTORE_FILE=${RUNNER_TEMP}/release-keystore.jks" >> "$GITHUB_ENV"
+            echo "SIGNING_MODE=release" >> "$GITHUB_ENV"
+            echo "Đã khôi phục Release Keystore từ GitHub Secrets."
+          else
+            echo "SIGNING_MODE=debug-fallback" >> "$GITHUB_ENV"
+            echo "::notice::Chưa cấu hình KEYSTORE_BASE64 trong GitHub Secrets; sẽ tạm ký Release APK bằng debug keystore."
+          fi
+
+      - name: Chạy Unit Test và đóng gói Release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew testDebugUnitTest assembleRelease --stacktrace
+
+      - name: Chuẩn bị file APK đầu ra & Báo cáo trạng thái ký
+        run: |
+          APK_SOURCE="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_SOURCE" ]; then
+            echo "Không tìm thấy $APK_SOURCE" >&2
+            exit 1
+          fi
+
+          if [ "$SIGNING_MODE" = "release" ]; then
+            OUT_APK="${RUNNER_TEMP}/LiteTube-v1.0.0-release.apk"
+            STATUS_TEXT="Đã ký bằng Release Keystore cố định (GitHub Secrets)"
+          else
+            OUT_APK="${RUNNER_TEMP}/LiteTube-v1.0.0-debugsigned.apk"
+            STATUS_TEXT="Tạm ký bằng Debug Keystore (chưa cấu hình GitHub Secrets)"
+          fi
+
+          cp "$APK_SOURCE" "$OUT_APK"
+
+          {
+            echo "### Kết quả đóng gói LiteTube"
+            echo "- **Application ID:** \`com.kaz.litetube\`"
+            echo "- **Trạng thái ký:** ${STATUS_TEXT}"
+            echo "- **File đầu ra:** \`$(basename "$OUT_APK")\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Tải file APK lên Artifacts để tải về điện thoại
         uses: actions/upload-artifact@v4
         with:
-          name: LiteTube-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
-          retention-days: 14
+          name: LiteTube-Release-APK
+          path: ${{ runner.temp }}/LiteTube-*.apk
+          retention-days: 30
+
+      - name: Dọn dẹp Keystore tạm trên runner
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/release-keystore.jks"

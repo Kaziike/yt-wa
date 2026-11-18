@@ -1,10 +1,10 @@
-package com.brave.youtubelite.settings
+package com.kaz.litetube.settings
 
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
-import com.brave.youtubelite.network.WebResourceCacheManager
+import com.kaz.litetube.network.WebResourceCacheManager
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale

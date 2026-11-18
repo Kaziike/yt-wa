@@ -1,4 +1,4 @@
-package com.brave.youtubelite.network
+package com.kaz.litetube.network
 
 import android.content.Context
 import android.content.Intent
@@ -12,7 +12,7 @@ import android.webkit.WebViewClient
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
-import com.brave.youtubelite.settings.AppSettings
+import com.kaz.litetube.settings.AppSettings
 import java.io.ByteArrayInputStream
 
 /**

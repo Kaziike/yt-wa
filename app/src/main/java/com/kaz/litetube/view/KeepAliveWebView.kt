@@ -1,4 +1,4 @@
-package com.brave.youtubelite.view
+package com.kaz.litetube.view
 
 import android.content.Context
 import android.util.AttributeSet

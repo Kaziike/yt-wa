@@ -1,4 +1,4 @@
-package com.brave.youtubelite.playback
+package com.kaz.litetube.playback
 
 import android.content.Context
 import android.content.Intent
@@ -7,11 +7,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.util.Rational
-import com.brave.youtubelite.network.UrlUtils
-import com.brave.youtubelite.network.WebAssetRepository
-import com.brave.youtubelite.service.MediaService
-import com.brave.youtubelite.settings.AppSettings
-import com.brave.youtubelite.view.KeepAliveWebView
+import com.kaz.litetube.network.UrlUtils
+import com.kaz.litetube.network.WebAssetRepository
+import com.kaz.litetube.service.MediaService
+import com.kaz.litetube.settings.AppSettings
+import com.kaz.litetube.view.KeepAliveWebView
 
 /**
  * Trình điều phối trung tâm giữa Browse WebView, Player WebView và MediaService:

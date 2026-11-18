@@ -1,11 +1,11 @@
-package com.brave.youtubelite.ui
+package com.kaz.litetube.ui
 
 import androidx.appcompat.app.AppCompatActivity
-import com.brave.youtubelite.R
-import com.brave.youtubelite.databinding.DialogSettingsBinding
-import com.brave.youtubelite.network.AdBlockEngine
-import com.brave.youtubelite.network.WebResourceCacheManager
-import com.brave.youtubelite.settings.AppSettings
+import com.kaz.litetube.R
+import com.kaz.litetube.databinding.DialogSettingsBinding
+import com.kaz.litetube.network.AdBlockEngine
+import com.kaz.litetube.network.WebResourceCacheManager
+import com.kaz.litetube.settings.AppSettings
 import com.google.android.material.bottomsheet.BottomSheetDialog
 
 /**

@@ -1,4 +1,4 @@
-package com.brave.youtubelite.network
+package com.kaz.litetube.network
 
 import org.junit.After
 import org.junit.Assert.assertFalse

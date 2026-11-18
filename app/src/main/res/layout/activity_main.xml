@@ -11,7 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
-        <com.brave.youtubelite.view.KeepAliveWebView
+        <com.kaz.litetube.view.KeepAliveWebView
             android:id="@+id/webView"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
@@ -19,7 +19,7 @@
     </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
     <!-- 2. TẦNG TRÊN: Lớp phát Video trượt đè lên (hỗ trợ kéo xuống toàn vùng video & bấm Logo thu nhỏ) -->
-    <com.brave.youtubelite.view.DraggablePlayerLayout
+    <com.kaz.litetube.view.DraggablePlayerLayout
         android:id="@+id/playerPanel"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -27,7 +27,7 @@
         android:visibility="gone">
 
         <!-- WebView chuyên dụng phát Video -->
-        <com.brave.youtubelite.view.KeepAliveWebView
+        <com.kaz.litetube.view.KeepAliveWebView
             android:id="@+id/playerWebView"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
@@ -115,7 +115,7 @@
 
         </LinearLayout>
 
-    </com.brave.youtubelite.view.DraggablePlayerLayout>
+    </com.kaz.litetube.view.DraggablePlayerLayout>
 
     <!-- Thanh tiến trình tải trang siêu mỏng -->
     <ProgressBar

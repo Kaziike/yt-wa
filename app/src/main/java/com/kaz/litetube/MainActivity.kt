@@ -1,4 +1,4 @@
-package com.brave.youtubelite
+package com.kaz.litetube
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -19,19 +19,19 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.brave.youtubelite.databinding.ActivityMainBinding
-import com.brave.youtubelite.network.AdBlockEngine
-import com.brave.youtubelite.network.AppWebViewClient
-import com.brave.youtubelite.network.UrlUtils
-import com.brave.youtubelite.network.WebAssetRepository
-import com.brave.youtubelite.network.WebResourceCacheManager
-import com.brave.youtubelite.playback.PlaybackCoordinator
-import com.brave.youtubelite.playback.WebBridge
-import com.brave.youtubelite.settings.AppSettings
-import com.brave.youtubelite.ui.FullscreenController
-import com.brave.youtubelite.ui.PipController
-import com.brave.youtubelite.ui.PlayerSheetController
-import com.brave.youtubelite.ui.SettingsBottomSheet
+import com.kaz.litetube.databinding.ActivityMainBinding
+import com.kaz.litetube.network.AdBlockEngine
+import com.kaz.litetube.network.AppWebViewClient
+import com.kaz.litetube.network.UrlUtils
+import com.kaz.litetube.network.WebAssetRepository
+import com.kaz.litetube.network.WebResourceCacheManager
+import com.kaz.litetube.playback.PlaybackCoordinator
+import com.kaz.litetube.playback.WebBridge
+import com.kaz.litetube.settings.AppSettings
+import com.kaz.litetube.ui.FullscreenController
+import com.kaz.litetube.ui.PipController
+import com.kaz.litetube.ui.PlayerSheetController
+import com.kaz.litetube.ui.SettingsBottomSheet
 
 /**
  * MainActivity tinh gọn (~240 dòng):

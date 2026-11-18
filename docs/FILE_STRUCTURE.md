@@ -15,6 +15,7 @@ LiteTube/
 │       │   ├── AndroidManifest.xml               # Khai báo singleTask MainActivity, Deep Links & MediaService
 │       │   ├── assets/
 │       │   │   ├── filters/
+│       │   │   │   ├── base_ux.css               # CSS nền tảng tối ưu trải nghiệm duyệt web
 │       │   │   │   ├── blocked_domains.txt       # Danh sách domain và đường dẫn quảng cáo/telemetry
 │       │   │   │   ├── cosmetic_rules.css        # Luật CSS ẩn quảng cáo banner & hộp thoại làm phiền
 │       │   │   │   └── player_ui.css             # Luật CSS ẩn thanh header web trên tầng Player
@@ -23,7 +24,7 @@ LiteTube/
 │       │   │       ├── youtube_defuser.js        # Lọc JSON InnerTube, vượt SSAI event-driven, Auto-Unmute
 │       │   │       ├── pip_controller.js         # Cô lập DOM PiP & điều khiển phát/chuyển bài/resync
 │       │   │       └── browse_interceptor.js     # Preconnect, chèn mục Cài đặt select_site & chặn SPA /watch
-│       │   ├── java/com/brave/youtubelite/
+│       │   ├── java/com/kaz/litetube/
 │       │   │   ├── MainActivity.kt               # Điều phối vòng đời Activity, Deep Link & Back Navigation
 │       │   │   ├── network/
 │       │   │   │   ├── UrlUtils.kt               # Phân tích URL, kiểm tra origin YouTube & giải mã /redirect
@@ -62,10 +63,13 @@ LiteTube/
 │       │           ├── colors.xml
 │       │           ├── strings.xml
 │       │           └── themes.xml
-│       └── test/java/com/brave/youtubelite/network/
+│       └── test/java/com/kaz/litetube/network/
 │           ├── AdBlockEngineTest.kt              # Unit Test kiểm tra chặn domain, subdomain và domain/path
 │           └── UrlAndCacheValidationTest.kt      # Unit Test chuẩn hóa URL, chống XSS/Captive Portal
 ├── docs/                                         # Hệ thống tài liệu kỹ thuật dự án
+├── scripts/
+│   └── generate-keystore.sh                      # Script tạo Release Keystore PKCS12 & hướng dẫn GitHub Secrets
+├── keystore.properties.example                   # Mẫu cấu hình khóa ký Release ở local
 ├── plan.md                                       # Báo cáo kiểm toán mã nguồn & kế hoạch tái cấu trúc
 ├── build.gradle.kts
 ├── settings.gradle.kts

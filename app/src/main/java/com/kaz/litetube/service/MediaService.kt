@@ -1,4 +1,4 @@
-package com.brave.youtubelite.service
+package com.kaz.litetube.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -23,8 +23,8 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.brave.youtubelite.MainActivity
-import com.brave.youtubelite.R
+import com.kaz.litetube.MainActivity
+import com.kaz.litetube.R
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ExecutorService
@@ -48,14 +48,14 @@ class MediaService : Service() {
     }
 
     companion object {
-        const val ACTION_START = "com.brave.youtubelite.service.START"
-        const val ACTION_UPDATE = "com.brave.youtubelite.service.UPDATE"
-        const val ACTION_STOP = "com.brave.youtubelite.service.STOP"
+        const val ACTION_START = "com.kaz.litetube.service.START"
+        const val ACTION_UPDATE = "com.kaz.litetube.service.UPDATE"
+        const val ACTION_STOP = "com.kaz.litetube.service.STOP"
 
-        const val ACTION_NOTIF_PLAY = "com.brave.youtubelite.service.NOTIF_PLAY"
-        const val ACTION_NOTIF_PAUSE = "com.brave.youtubelite.service.NOTIF_PAUSE"
-        const val ACTION_NOTIF_NEXT = "com.brave.youtubelite.service.NOTIF_NEXT"
-        const val ACTION_NOTIF_PREV = "com.brave.youtubelite.service.NOTIF_PREV"
+        const val ACTION_NOTIF_PLAY = "com.kaz.litetube.service.NOTIF_PLAY"
+        const val ACTION_NOTIF_PAUSE = "com.kaz.litetube.service.NOTIF_PAUSE"
+        const val ACTION_NOTIF_NEXT = "com.kaz.litetube.service.NOTIF_NEXT"
+        const val ACTION_NOTIF_PREV = "com.kaz.litetube.service.NOTIF_PREV"
 
         const val EXTRA_TITLE = "EXTRA_TITLE"
         const val EXTRA_CHANNEL = "EXTRA_CHANNEL"

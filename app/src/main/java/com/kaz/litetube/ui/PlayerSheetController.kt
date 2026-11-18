@@ -1,4 +1,4 @@
-package com.brave.youtubelite.ui
+package com.kaz.litetube.ui
 
 import android.annotation.SuppressLint
 import android.content.res.Resources
@@ -9,8 +9,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
-import com.brave.youtubelite.databinding.ActivityMainBinding
-import com.brave.youtubelite.playback.PlaybackState
+import com.kaz.litetube.databinding.ActivityMainBinding
+import com.kaz.litetube.playback.PlaybackState
 import kotlin.math.abs
 
 /**

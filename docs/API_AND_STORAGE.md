@@ -7,7 +7,7 @@ Tài liệu này mô tả giao thức giao tiếp giữa JavaScript và Kotlin N
 ## 1. Giao Tiếp Hai Chiều JavaScript ↔ Kotlin Native
 
 ### A. Chiều Web → Android: `WebBridge` (`window.AndroidBridge`)
-Lớp `com.brave.youtubelite.playback.WebBridge` được tách độc lập khỏi `MainActivity` (có phương thức `detach()` gỡ tham chiếu khi hủy) và rút gọn còn đúng **3 phương thức `@JavascriptInterface`**:
+Lớp `com.kaz.litetube.playback.WebBridge` được tách độc lập khỏi `MainActivity` (có phương thức `detach()` gỡ tham chiếu khi hủy) và rút gọn còn đúng **3 phương thức `@JavascriptInterface`**:
 
 | Phương thức | Tham số | Chức năng |
 | :--- | :--- | :--- |
@@ -33,10 +33,10 @@ Gửi biểu thức gọi hàm gọn nhẹ tới `window.__bravePip` (chỉ nạ
 
 ### B. Khóa Phiên Cho Nút Điều Khiển PiP (`PipController`)
 Do các `RemoteAction` của cửa sổ PiP được gọi bởi `com.android.systemui`, `PipController` sinh một khóa ngẫu nhiên `pipAuthToken = UUID.randomUUID().toString()` trong bộ nhớ cho mỗi phiên chạy và đính kèm vào `EXTRA_PIP_TOKEN` của 4 action:
-- `com.brave.youtubelite.PIP_HEADPHONES`
-- `com.brave.youtubelite.PIP_PLAY`
-- `com.brave.youtubelite.PIP_PAUSE`
-- `com.brave.youtubelite.PIP_NEXT`
+- `com.kaz.litetube.PIP_HEADPHONES`
+- `com.kaz.litetube.PIP_PLAY`
+- `com.kaz.litetube.PIP_PAUSE`
+- `com.kaz.litetube.PIP_NEXT`
 
 Mọi Intent không mang đúng `EXTRA_PIP_TOKEN` đều bị từ chối ngay lập tức.
 

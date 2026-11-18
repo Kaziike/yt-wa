@@ -29,6 +29,7 @@
 - **Android Gradle Plugin (AGP):** `8.3.2`.
 - **Gradle Version:** `8.4` (phân phối qua Gradle Wrapper).
 - **Build Tools / SDK:**
+  - `applicationId`: `"com.kaz.litetube"` (bản debug dùng hậu tố `.debug`)
   - `compileSdk`: `34`
   - `targetSdk`: `34`
   - `minSdk`: `26`
@@ -53,23 +54,24 @@ Dự án được tinh gọn tối đa, chỉ phụ thuộc vào các thư việ
 ## 3. Cách Khởi Chạy & Đóng Gói Ứng Dụng
 
 ### Cách 1: Đóng gói tự động qua CI/CD GitHub Actions
-Dự án được cấu hình sẵn pipeline `.github/workflows/build-apk.yml`. Khi có thao tác đẩy code (`push`) hoặc tạo pull request lên nhánh `main` / `master`, hệ thống Ubuntu runner sẽ:
-1. Thiết lập Java 17 Temurin.
-2. Tự động cấp quyền và chạy `./gradlew assembleDebug --stacktrace`.
-3. Đẩy file APK kết quả vào mục **Artifacts** (`LiteTube-Debug-APK`) với thời gian lưu trữ 14 ngày.
+Dự án được cấu hình sẵn pipeline `.github/workflows/build-apk.yml`. Khi có thao tác đẩy code (`push`) lên nhánh `main` / `master` / `test` hoặc tạo pull request lên `main` / `master`, hệ thống Ubuntu runner sẽ:
+1. Kiểm tra cú pháp JavaScript Scriptlets bằng `node --check` và thiết lập Java 17 Temurin.
+2. Khôi phục Release Keystore từ GitHub Secrets (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) nếu đã cấu hình, hoặc tự fallback sang debug keystore.
+3. Chạy `./gradlew testDebugUnitTest assembleRelease --stacktrace`.
+4. Đẩy file APK kết quả vào mục **Artifacts** (`LiteTube-Release-APK`) với thời gian lưu trữ 30 ngày.
 
 ### Cách 2: Biên dịch qua dòng lệnh (Local CLI)
 Yêu cầu máy tính đã cài đặt JDK 17 và cấu hình biến môi trường `ANDROID_HOME`:
 ```powershell
 # Dành cho Windows:
-.\gradlew.bat assembleDebug
+.\gradlew.bat assembleRelease
 
 # Dành cho macOS/Linux:
 chmod +x ./gradlew
-./gradlew assembleDebug
+./gradlew assembleRelease
 ```
 File APK đầu ra sẽ nằm tại:
-`app/build/outputs/apk/debug/app-debug.apk`
+`app/build/outputs/apk/release/app-release.apk` (hoặc `app/build/outputs/apk/debug/app-debug.apk` khi chạy `assembleDebug`).
 
 ### Cách 3: Mở bằng Android Studio
 Mở thư mục gốc dự án bằng Android Studio, đồng bộ Gradle (Sync Project with Gradle Files) và bấm nút **Run** (`Shift + F10`).

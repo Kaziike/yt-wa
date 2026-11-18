@@ -1,20 +1,58 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.isFile) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun signingProp(propKey: String, envKey: String): String? =
+    keystoreProperties.getProperty(propKey)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(envKey)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingProp("storeFile", "KEYSTORE_FILE")?.let { rootProject.file(it) }
+val releaseStorePassword = signingProp("storePassword", "KEYSTORE_PASSWORD")
+val releaseKeyAlias = signingProp("keyAlias", "KEY_ALIAS")
+val releaseKeyPassword = signingProp("keyPassword", "KEY_PASSWORD")
+
+val hasReleaseKeystore = releaseStoreFile != null &&
+    releaseStoreFile.isFile &&
+    releaseStorePassword != null &&
+    releaseKeyAlias != null &&
+    releaseKeyPassword != null
+
 android {
-    namespace = "com.brave.youtubelite"
+    namespace = "com.kaz.litetube"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.brave.youtubelite"
+        applicationId = "com.kaz.litetube"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
@@ -25,7 +63,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.lifecycle("[LiteTube] Release keystore chưa được cấu hình; tạm fallback sang debug signingConfig.")
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             isMinifyEnabled = false

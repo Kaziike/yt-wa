@@ -1,4 +1,4 @@
-package com.brave.youtubelite.view
+package com.kaz.litetube.view
 
 import android.annotation.SuppressLint
 import android.content.Context

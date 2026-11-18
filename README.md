@@ -53,7 +53,7 @@
 
 ### Cách 1: Tải Bản Đóng Gói Sẵn (Khuyên dùng)
 1. Truy cập mục [**Releases**](https://github.com/Kaziike/yt-wa/releases) hoặc tab [**Actions**](https://github.com/Kaziike/yt-wa/actions) của kho lưu trữ này.
-2. Tải về file `.apk` mới nhất từ mục **Artifacts** (`LiteTube-Debug-APK`).
+2. Tải về file `.apk` mới nhất từ mục **Artifacts** (`LiteTube-Release-APK`).
 3. Mở file `.apk` trên điện thoại Android (8.0+) để cài đặt và trải nghiệm!
 
 ### Cách 2: Tự Biên Dịch Từ Mã Nguồn
@@ -63,12 +63,12 @@ Yêu cầu: **JDK 17** và **Android SDK Platform 34**.
 git clone https://github.com/Kaziike/yt-wa.git
 cd yt-wa
 
-# Chạy kiểm thử đơn vị và đóng gói Debug APK
+# Chạy kiểm thử đơn vị và đóng gói Release APK (hoặc assembleDebug để thử nghiệm)
 chmod +x ./gradlew
-./gradlew testDebugUnitTest assembleDebug
+./gradlew testDebugUnitTest assembleRelease
 ```
 
-File APK đầu ra nằm tại: `app/build/outputs/apk/debug/app-debug.apk`.
+File APK đầu ra nằm tại: `app/build/outputs/apk/release/app-release.apk` (hoặc `app/build/outputs/apk/debug/app-debug.apk` cho bản Debug). Để ký bản Release cố định tại máy local hoặc trên GitHub Actions, xem hướng dẫn tại [`docs/DEVELOPMENT_GUIDE.md`](./docs/DEVELOPMENT_GUIDE.md).
 
 ---
 
