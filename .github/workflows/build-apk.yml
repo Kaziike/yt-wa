@@ -2,7 +2,7 @@ name: Build LiteTube APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "test" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
